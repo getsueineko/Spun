@@ -114,19 +114,65 @@ if(APPLE)
         MACOSX_BUNDLE_COPYRIGHT "Copyright (c) 2026 Spun contributors"
         OUTPUT_NAME "Spun"
     )
-    # Bundle the icon into Resources/ of the .app
+    # Bundle the icon into Resources/ of the app
     if(EXISTS "${CMAKE_SOURCE_DIR}/resources/spun-icon.icns")
         set_source_files_properties("${CMAKE_SOURCE_DIR}/resources/spun-icon.icns"
             PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
         target_sources(spun PRIVATE "${CMAKE_SOURCE_DIR}/resources/spun-icon.icns")
     endif()
+
+    # macOS deployment pipeline:
+    #   1. macdeployqt bundles Qt frameworks + plugins into the .app
+    #   2. We strip absolute Homebrew rpaths from the deployed frameworks so
+    #      macOS stops also loading /opt/homebrew's Qt and crashing with
+    #      "Class X is implemented in both" duplicate-class errors
+    #   3. Add @executable_path/../Frameworks as rpath on every framework that
+    #      references @rpath/* so dependencies resolve to the bundle
+    #   4. Ad-hoc codesign the whole bundle with a single shared identifier so
+    #      Gatekeeper accepts the inner frameworks as belonging to the app
+    # Without step 4, macOS 14+ LaunchServices rejects the bundle with
+    # "different Team IDs" and the app crashes before reaching main().
+    find_program(MACDEPLOYQT_EXECUTABLE macdeployqt HINTS "${Qt6_DIR}/../../../bin")
+    if(MACDEPLOYQT_EXECUTABLE)
+        # Omit -qmldir: the Qt 6.11 qmlimportscanner crashes on Spun's qml/
+        # tree. The static QML cache already in the binary carries everything
+        # Main.qml actually uses.
+        add_custom_command(TARGET spun POST_BUILD
+            COMMAND "${MACDEPLOYQT_EXECUTABLE}"
+                "$<TARGET_BUNDLE_DIR:spun>"
+                -no-codesign
+                -no-strip
+            COMMENT "Deploying Qt frameworks into Spun.app via macdeployqt"
+            VERBATIM
+        )
+        # The QML plugins, rpath rewriting and ad-hoc signing are all done
+        # by scripts/sign-macos-bundle.sh in a single deterministic order.
+        # file(COPY ...) cannot be sequenced against add_custom_command(POST_BUILD)
+        # reliably on multi-job Ninja builds, so we run everything in shell.
+        find_program(INSTALL_NAME_TOOL_EXECUTABLE install_name_tool)
+        find_program(CODESIGN_EXECUTABLE codesign)
+        if(INSTALL_NAME_TOOL_EXECUTABLE AND CODESIGN_EXECUTABLE)
+            set(_bundle "$<TARGET_BUNDLE_DIR:spun>")
+            set(_qml_root "${Qt6_DIR}/../../../share/qt/qml")
+            set(_entitlements "${CMAKE_SOURCE_DIR}/resources/spun.entitlements")
+            add_custom_command(TARGET spun POST_BUILD
+                COMMAND "${CMAKE_SOURCE_DIR}/scripts/sign-macos-bundle.sh"
+                    "${_bundle}"
+                    "com.yappologistic.spun"
+                    "${_entitlements}"
+                    "${_qml_root}"
+                COMMENT "Deploying QML plugins, rewriting rpaths and ad-hoc signing Spun.app"
+                VERBATIM
+            )
+        endif()
+    endif()
 endif()
 if(CMAKE_STRIP AND CMAKE_BUILD_TYPE STREQUAL "Release")
     # Debug/RelWithDebInfo builds retain symbols; strip only the shipped Release app.
-    if(APPLE)
-        # macOS strip uses no flag for "strip unneeded" — it is the default behaviour.
-        add_custom_command(TARGET spun POST_BUILD COMMAND ${CMAKE_STRIP} -x $<TARGET_FILE:spun>)
-    else()
+    # On Apple the strip step is skipped: macdeployqt (run below) rewrites the
+    # binary into the bundle and re-signs ad-hoc, so doing the strip here would
+    # either invalidate the codesign stamp or be wasted work.
+    if(NOT APPLE)
         add_custom_command(TARGET spun POST_BUILD COMMAND ${CMAKE_STRIP} --strip-unneeded $<TARGET_FILE:spun>)
     endif()
 endif()

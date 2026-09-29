@@ -43,6 +43,7 @@
 /resources/*
 !/resources/Info.plist.in
 !/resources/spun-icon.icns
+!/resources/spun.entitlements
 
 # Never publish credentials, private state, editor backups or generated caches.
 .env*
