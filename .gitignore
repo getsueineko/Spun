@@ -39,6 +39,11 @@
 !/flake.nix
 !/flake.lock
 
+!/resources/
+/resources/*
+!/resources/Info.plist.in
+!/resources/spun-icon.icns
+
 # Never publish credentials, private state, editor backups or generated caches.
 .env*
 *.ini

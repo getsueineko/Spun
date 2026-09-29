@@ -103,6 +103,24 @@ function(spun_application target)
     endif()
 endfunction()
 spun_application(spun)
+if(APPLE)
+    set_target_properties(spun PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/resources/Info.plist.in"
+        MACOSX_BUNDLE_BUNDLE_NAME "Spun"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.yappologistic.spun"
+        MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+        MACOSX_BUNDLE_COPYRIGHT "Copyright (c) 2026 Spun contributors"
+        OUTPUT_NAME "Spun"
+    )
+    # Bundle the icon into Resources/ of the .app
+    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/spun-icon.icns")
+        set_source_files_properties("${CMAKE_SOURCE_DIR}/resources/spun-icon.icns"
+            PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+        target_sources(spun PRIVATE "${CMAKE_SOURCE_DIR}/resources/spun-icon.icns")
+    endif()
+endif()
 if(CMAKE_STRIP AND CMAKE_BUILD_TYPE STREQUAL "Release")
     # Debug/RelWithDebInfo builds retain symbols; strip only the shipped Release app.
     if(APPLE)
