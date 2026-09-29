@@ -628,13 +628,27 @@ Item {
 
     }
 
-    FileDialog {
-        id: stemFile
-
-        title: "Load channel " + (mixer.loadChannel + 1) + " audio"
-        fileMode: FileDialog.OpenFile
-        nameFilters: ["Audio (*.wav *.flac *.mp3 *.m4a *.ogg *.opus *.aiff)"]
-        onAccepted: tx6.load(mixer.loadChannel, selectedFile)
+    // FileDialog is wrapped in a Loader so the QML engine creates it
+    // lazily, after the rest of Tx6Controls has finished initialising.
+    // Qt 6.11 attaches a QFileDialogOptions value type to FileDialog
+    // through the default `data` property, which Spun's standalone bundle
+    // fails to resolve during top-down construction with "Cannot assign
+    // QFileDialogOptions to list property data". Lazy creation avoids
+    // that race on first use.
+    Loader {
+        id: stemFileLoader
+        active: false
+        sourceComponent: FileDialog {
+            id: stemFile
+            title: "Load channel " + (mixer.loadChannel + 1) + " audio"
+            fileMode: FileDialog.OpenFile
+            nameFilters: ["Audio (*.wav *.flac *.mp3 *.m4a *.ogg *.opus *.aiff)"]
+            onAccepted: tx6.load(mixer.loadChannel, selectedFile)
+        }
+        onLoaded: if (stemFileLoader.item) stemFileLoader.item.open()
+    }
+    function loadStemFile() {
+        stemFileLoader.active = true
     }
 
 }

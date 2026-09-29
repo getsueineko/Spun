@@ -29,35 +29,93 @@ find "$bundle/Contents/Frameworks" -type f -name 'Qt*' -exec chmod +x {} \; 2>/d
 find "$bundle/Contents/PlugIns" -type f \( -name '*.dylib' -o -name 'libq*' \) -exec chmod +x {} \; 2>/dev/null || true
 find "$bundle/Contents/Resources" -type f -name '*.dylib' -exec chmod +x {} \; 2>/dev/null || true
 
-# 1. Copy the QML runtime plugins. macdeployqt's -qmldir scanner crashes on
-#    Qt 6.11 with Spun's qml/ tree, so we copy the directory by hand. The
-#    whole QtQuick tree is included because it is small and Styles/ subdirs
-#    live next to Controls/. Without qtquickcontrols2plugin the QML engine
-#    aborts on the second line of Main.qml with "plugin not found".
+# 1. Copy the QML scaffolding. macdeployqt's -qmldir scanner crashes on
+#    Qt 6.11 with Spun's qml/ tree, so we work around it. The strategy:
 #
-#    Homebrew ships qmldir / plugins.qmltypes / libqtquickcontrols2plugin.dylib
-#    as symlinks into the qtdeclarative Cellar; we must dereference them with
-#    -L or `rsync --copy-links`, otherwise the bundle ends up with broken
-#    qmldir pointers that the QML engine can't read and rejects with
-#    "plugin not found".
+#    a. Copy only the qmldir files (and plugins.qmltypes) from Homebrew's
+#       share/qt/qml — they tell the QML engine which C++ plugin dylib
+#       backs each module and which types it exports. We do NOT copy the
+#       .qml files themselves because Qt 6.11 builds the modules into
+#       its framework binaries via qt_add_qml_module and the in-binary
+#       resources (qrc:/qt-project.org/imports/...) carry the actual
+#       definitions of types like FileDialogImpl and TextEditingContextMenu.
+#       Mixing disk and binary copies corrupts the module graph and the
+#       QML engine aborts on the second line of Main.qml.
 #
-#    The Qt 6 QML engine loads C++ modules from two locations:
-#      - <app>/Contents/Resources/qml/<Module>/  (used for qmldir-based modules)
-#      - <app>/Contents/PlugIns/quick/          (used for the bundled plugins)
-#    We populate both.
+#    b. Drop the `prefer :/qt-project.org/imports/...` line from the qmldir
+#       we copied — otherwise Qt looks at its in-binary qmldir (which is
+#       missing private types like TextEditingContextMenu) instead of the
+#       actual .qml files baked into QtQuickControls2.framework.
+#
+#    c. Copy the C++ plugin dylibs into PlugIns/quick/ so the QML engine
+#       can dlopen them through the standard qmlimport path.
+#
+#    d. Copy the private frameworks the plugins link against
+#       (QtQuickControls2Impl, QtQuickDialogs2Impl, the style frameworks
+#       and QtQuickTemplates2). macdeployqt would normally do this via
+#       -qmldir; we dropped that because of the scanner crash.
 if [[ -n "$qml_root" && -d "$qml_root" ]]; then
     qml_dest="$bundle/Contents/Resources/qml"
     rm -rf "$qml_dest"
     mkdir -p "$qml_dest"
+
+    # Copy qmldir / plugins.qmltypes for every Qt module so the QML engine
+    # knows which plugin dylib backs each module. Then copy the .qml files
+    # for the modules Spun actually imports: QtQuick, QtQuick.2, QtQml,
+    # QtQuick.Controls (Basic + Fusion), QtQuick.Dialogs, QtQuick.Layouts,
+    # QtQuick.Templates, QtQuick.Window, QtQml.Models, Qt.labs.*, QtQuick.3D.
+    #
+    # The Qt 6 framework binaries already ship their own private types
+    # (FileDialogImpl, TextEditingContextMenu) compiled in, so the disk
+    # copies only need the public surfaces. We pick the listed modules
+    # explicitly so we don't drag in 100+ MB of unused style qml files.
     if command -v rsync >/dev/null 2>&1; then
-        rsync -aL --exclude='__pycache__' --exclude='.cache' \
-            "$qml_root"/ "$qml_dest"/
-    else
-        cp -RL "$qml_root"/. "$qml_dest"/
+        rsync -aL --include='qmldir' --include='plugins.qmltypes' \
+            --include='*/' --exclude='*' \
+            "$qml_root"/ "$qml_dest"/ 2>/dev/null || true
     fi
+    if [[ ! -f "$qml_dest/QtQuick/qmldir" ]]; then
+        while IFS= read -r src; do
+            rel="${src#$qml_root/}"
+            dest="$qml_dest/$rel"
+            mkdir -p "$(dirname "$dest")"
+            cp -RL "$src" "$dest" 2>/dev/null || true
+        done < <(find "$qml_root" -type f \( -name 'qmldir' -o -name 'plugins.qmltypes' \) 2>/dev/null)
+    fi
+
+    # Copy the .qml files Spun needs. Limit the list to keep the bundle
+    # small and avoid modules that ship private types compiled in
+    # (e.g. QtQuick.VirtualKeyboard, QtWebEngine).
+    for sub in QtQuick QtQuick.2 QtQml QtQml/Models \
+               QtQuick/Controls QtQuick/Controls/Basic \
+               QtQuick/Controls/Fusion \
+               QtQuick/Dialogs QtQuick/Dialogs/quickimpl \
+               QtQuick/Layouts QtQuick/Templates QtQuick/Window \
+               Qt/labs Qt/labs/platform Qt/labs/qmlmodels \
+               QtQuick/3D; do
+        if [[ -d "$qml_root/$sub" ]]; then
+            mkdir -p "$qml_dest/$(dirname "$sub")"
+            if command -v rsync >/dev/null 2>&1; then
+                rsync -aL "$qml_root/$sub"/ "$qml_dest/$sub/" 2>/dev/null || true
+            else
+                cp -RL "$qml_root/$sub"/. "$qml_dest/$sub"/ 2>/dev/null || true
+            fi
+        fi
+    done
+
+    # Drop the `prefer :/qt-project.org/imports/...` line from every qmldir
+    # we copied. With it, the QML engine resolves modules to the copies
+    # baked into the Qt frameworks and never reads the in-binary qmldir —
+    # and the embedded Qt 6.11 copies do not include some private types
+    # (e.g. QtQuick.Controls.Basic.impl.TextEditingContextMenu) that Spun
+    # relies on. Removing the prefer line forces a fallback lookup.
+    while IFS= read -r qmldir; do
+        sed -i '' '/^prefer[ \t]*:[^ \t]/d' "$qmldir" 2>/dev/null || true
+    done < <(find "$qml_dest" -name 'qmldir' -type f 2>/dev/null)
+
     # Quick 3D helper plugin lives in <prefix>/plugins/quick; place it under
-    # PlugIns/quick/ so the QML engine finds it through the standard qmlimport
-    # path.
+    # PlugIns/quick/ so the QML engine finds it through the standard
+    # qmlimport path.
     quick_plugin_src="$(dirname "$qml_root")/../plugins/quick"
     if [[ -d "$quick_plugin_src" ]]; then
         mkdir -p "$bundle/Contents/PlugIns/quick"
@@ -67,22 +125,26 @@ if [[ -n "$qml_root" && -d "$qml_root" ]]; then
             cp -RL "$quick_plugin_src"/. "$bundle/Contents/PlugIns/quick/"
         fi
     fi
-    # The C++ QML plugins under <qml_root>/QtQuick/Controls (and other dirs)
-    # also need to live under PlugIns/quick so the QML engine can dlopen
-    # them. The qmldir in Resources/qml references the plugin name only; the
-    # actual .dylib lookup goes through PlugIns.
+
+    # C++ QML plugin dylibs into PlugIns/quick so the QML engine can dlopen
+    # them through the standard qmlimport path. We also copy each plugin
+    # into its module's qml directory (Resources/qml/<Module>/) because
+    # qmldir's "plugin <name>" directive resolves the dylib relative to
+    # the qmldir's own folder, not via the standard QmlImportPath.
     mkdir -p "$bundle/Contents/PlugIns/quick"
     while IFS= read -r plugin; do
         cp -RL "$plugin" "$bundle/Contents/PlugIns/quick/" || true
+        # Mirror to the qml folder so qmldir's "plugin" directive resolves.
+        rel="${plugin#$qml_root/}"
+        mirror="$qml_dest/$rel"
+        if [[ -d "$(dirname "$mirror")" ]]; then
+            cp -RL "$plugin" "$mirror" || true
+        fi
     done < <(find "$qml_root" -name '*plugin*.dylib' 2>/dev/null)
 
-    # Some QML plugins link to private frameworks (QtQuickControls2Impl,
-    # QtQuickDialogs2Impl, QtLabsAnimation) that macdeployqt would normally
-    # copy via -qmldir. We dropped -qmldir because the Qt 6.11
-    # qmlimportscanner crashes on Spun's qml/ tree, so we look them up
-    # ourselves next to the main Qt frameworks and copy what is missing.
-    # QtPdf is intentionally NOT bundled: it embeds private Apple APIs and
-    # triggers codesign "bundle format is ambiguous" errors on macOS 14.
+    # Pull in any private framework the QML plugins link against
+    # (QtQuickControls2Impl, QtQuickDialogs2Impl, QtLabsAnimation) plus
+    # the style frameworks and QtQuickTemplates2.
     if command -v brew >/dev/null 2>&1; then
         qtdecl_prefix="$(brew --prefix qtdeclarative 2>/dev/null || true)"
     fi
@@ -104,10 +166,6 @@ if [[ -n "$qml_root" && -d "$qml_root" ]]; then
             fi
         fi
     done
-    # Pull in any QtQuickControls2* style framework and QtQuickDialogs2* that's
-    # referenced by a QML plugin but missing from the bundle. We don't know
-    # which style Spun will pick at runtime, so a wildcard is simpler than a
-    # hand-rolled list.
     if [[ -n "$qtdecl_prefix" && -d "$qtdecl_prefix/lib" ]]; then
         for fw_dir in "$qtdecl_prefix/lib"/QtQuickControls2*.framework \
                       "$qtdecl_prefix/lib"/QtQuickDialogs2*.framework \
