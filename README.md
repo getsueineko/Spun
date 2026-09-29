@@ -1,6 +1,6 @@
 <h1 align="center">Spun</h1>
 
-<p align="center">A music player for Linux with CD, vinyl, cassette and recorder views.</p>
+<p align="center">A music player for Linux and macOS with CD, vinyl, cassette and recorder views.</p>
 
 <p align="center">
   <img src="assets/screenshots/spun-vinyl.png" alt="Spun in vinyl mode with a gold tonearm and the Cider queue alongside it" width="1000">
@@ -19,14 +19,36 @@
   <a href="#start-listening">Get started</a> ·
   <a href="#inside-the-player">Features</a> ·
   <a href="#troubleshooting-and-privacy">Help</a> ·
+  <a href="#development">Development</a> ·
   <a href="#license">License</a>
 </p>
 
 Play local music, browse YouTube Music anonymously, connect to Jellyfin, Navidrome or Subsonic, or control Apple Music through Cider. Spun puts your album artwork on a spinning CD, vinyl record, cassette or TP-7-inspired recorder, with an interface inspired by Material Design 3. Optional 3D players add physical depth and lighting that follows Noctalia's wallpaper palette.
 
+Linux is the primary platform. macOS is fully supported on Apple Silicon running macOS 14 (Sonoma) or newer; an Intel build is not provided.
+
 **Source-available · PolyForm Noncommercial 1.0.0.** Personal and other permitted noncommercial use is free. This is not an OSI-approved open-source license. [Read the license details](#license).
 
 ## Install
+
+### macOS
+
+Spun on macOS ships as a standalone `.app` bundle with all Qt frameworks inside. It is ad-hoc-signed and not notarised, so Gatekeeper may require one extra click the first time you open it.
+
+**Homebrew (preferred):**
+
+```bash
+brew install --cask yappologistic/tap/spun
+```
+
+**Manual download:**
+
+1. Download `Spun-x.y.z-macos-arm64.tar.gz` from the [latest GitHub release](https://github.com/yappologistic/Spun/releases/latest).
+2. Double-click the archive in Finder to extract `Spun.app`.
+3. Drag `Spun.app` into `/Applications`.
+4. The first launch needs an extra step because the bundle is not notarised — see [First launch on macOS](#first-launch-on-macos).
+
+### Linux
 
 <details>
 <summary><b>Build dependencies for Arch and CachyOS</b></summary>
@@ -98,6 +120,57 @@ nix develop
 The license is noncommercial, so Nix requires an explicit unfree-package opt-in. The flake supports x86_64 and aarch64 Linux. Wayland and X11 plugins are included; no display backend is forced.
 
 </details>
+
+<details>
+<summary><b>Build on macOS (Apple Silicon, macOS 14+)</b></summary>
+
+Build dependencies are installed with Homebrew:
+
+```bash
+brew install qt cmake ninja pkg-config taglib
+```
+
+Then, from a fresh clone on the `feature/macos-port` branch (or `main` after the macOS port is merged):
+
+```bash
+./scripts/build-macos.sh -DBUILD_TESTING=OFF
+```
+
+The script wires `CMAKE_PREFIX_PATH` to Homebrew's Qt, patches two GNU-isms in the CMake link step (`-Wl,-dead_strip`, BSD `strip -x`), and produces `build/Spun.app` with Qt frameworks, QML modules and an ad-hoc signature bundled in. The whole thing takes about three minutes on an M-series Mac.
+
+If you also want the diagnostic companion:
+
+```bash
+cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target spun-diagnostics --parallel 4
+```
+
+To launch the resulting bundle directly (bypassing LaunchServices):
+
+```bash
+./build/Spun.app/Contents/MacOS/Spun
+```
+
+**Heads-up on duplicate-class warnings.** If you have Homebrew's `qt` package installed (as the build requires), macOS will load both `Spun.app/Contents/Frameworks/QtCore.framework` and `/opt/homebrew/Cellar/qtbase/.../QtCore.framework` at the same time. You will see five or six lines in the system log along the lines of `objc[Spun]: Class QT_PREPEND_NAMESPACE(QCocoaApplicationDelegate) is implemented in both ... One of the two will be used. Which one is undefined.` They are harmless: the bundled Qt is the one actually wired into the app via `@rpath`, and the homebrew copy is loaded by the Objective-C runtime only for class lookups that resolve identically. A user who installed Spun via Homebrew without the Qt build dependency installed will not see these. They are a dev-machine artifact and safe to ignore.
+
+</details>
+
+### First launch on macOS
+
+Because the `.app` is ad-hoc-signed and not notarised by Apple, double-clicking it the first time opens a Gatekeeper dialog that says the developer cannot be verified.
+
+1. In Finder, right-click (or Control-click) `Spun.app` and choose **Open**.
+2. Click **Open** in the dialog that appears.
+3. macOS remembers the decision for future launches.
+
+Alternatively, from the terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Spun.app
+open /Applications/Spun.app
+```
+
+The bundle is self-contained: it does not need Homebrew Qt, TagLib or any other dependency installed on the user's machine.
 
 ## Start listening
 
@@ -274,20 +347,28 @@ Immersive mode hides controls after inactivity; move the pointer or use the keyb
 
 ## Update or remove
 
-To update, open a terminal in your Spun folder:
+**macOS (Homebrew):**
+
+```bash
+brew upgrade --cask yappologistic/tap/spun
+```
+
+**macOS (manual install):** download the latest `Spun-x.y.z-macos-arm64.tar.gz` from the [releases page](https://github.com/yappologistic/Spun/releases/latest), quit Spun, replace `/Applications/Spun.app` with the new copy.
+
+**Linux:** open a terminal in your Spun folder:
 
 ```bash
 git pull --ff-only
 ./scripts/build.sh -DBUILD_TESTING=OFF
 ```
 
-To remove the application-menu entry:
+To remove the application-menu entry on Linux:
 
 ```bash
 rm "${XDG_DATA_HOME:-$HOME/.local/share}/applications/spun.desktop"
 ```
 
-You can then delete the Spun source folder. Your music stays where it was. Preferences remain in `~/.config/spun/` unless you remove them separately.
+You can then delete the Spun source folder. Your music stays where it was. Preferences remain in `~/.config/spun/` (Linux) or `~/Library/Application Support/com.yappologistic.spun/` (macOS) unless you remove them separately. On macOS, dragging `Spun.app` to the Trash also works.
 
 ## Troubleshooting and privacy
 
@@ -296,6 +377,8 @@ You can then delete the Spun source folder. Your music stays where it was. Prefe
 - **3D is unavailable:** install Qt Quick 3D and rebuild. Qt's software scenegraph backend does not support the 3D view; the regular player remains available.
 - **A font is missing:** install it, reopen Spun and select it again. An unavailable saved font falls back to the system font.
 - **An audio file will not play:** supported formats depend on the codecs available to Qt Multimedia on your distribution.
+- **"Spun.app is damaged and can't be opened" on macOS:** the ad-hoc signature is intact but the file has the `com.apple.quarantine` xattr. Run `xattr -dr com.apple.quarantine /Applications/Spun.app` or move the app out of and back into `/Applications` (Finder re-extends quarantine to downloads). The right-click → Open workaround described in [First launch on macOS](#first-launch-on-macos) is the supported path.
+- **`objc[...] Class X is implemented in both` warnings on macOS:** expected on developer machines that have Homebrew's `qt` formula installed. Harmless; see the note in [Build on macOS](#install).
 
 Spun does not ask for your Apple Music password. Its Cider token is stored with owner-only file permissions in `~/.config/spun/cider-connection.json`. Preferences and local listening data also stay in `~/.config/spun/`. Artwork and music metadata may be fetched during playback and browsing. Do not include tokens, private configuration, listening history or personal logs in issue reports.
 
@@ -306,12 +389,23 @@ Spun does not ask for your Apple Music password. Its Cider token is stored with 
 
 Build the diagnostic companion and run the registered tests:
 
+**Linux:**
+
 ```bash
 ./scripts/build.sh -DBUILD_TESTING=ON
 ctest --test-dir build --output-on-failure
 ```
 
-Tests use temporary preferences and synthetic local API fixtures. Audio checks need a working user audio session, and API fixtures need permission to listen on loopback. Desktop-control tests use a private D-Bus session. Diagnostics are separate from the normal player.
+**macOS:**
+
+```bash
+./scripts/build-macos.sh -DBUILD_TESTING=ON
+ctest --test-dir build --output-on-failure -E 'spun-desktop-media'
+```
+
+The `-E 'spun-desktop-media'` exclusion is required because that test brings up a private D-Bus session, which Linux's `mpris` integration needs and macOS does not provide. All other tests run in offscreen mode on macOS. Note that the `spun-playback-and-ui` test is gated by a QFileDialog handle lookup that is currently broken on macOS — see [Known limitations](#known-limitations) — so the registration is skipped until that is fixed.
+
+Tests use temporary preferences and synthetic local API fixtures. Audio checks need a working user audio session, and API fixtures need permission to listen on loopback. Desktop-control tests use a private D-Bus session (Linux only). Diagnostics are separate from the normal player.
 
 The registered YouTube test uses local fixtures and needs no network or provider runtime. Run `python3 tests/test_youtube.py` for helper parsing checks. After setting up the optional runtime, `./build/spun --test-youtube-live` checks anonymous browsing, playback, seeking and artwork against the live service with temporary settings. `./scripts/preview-youtube.sh` opens a separate local preview profile with Cider and desktop media registration disabled.
 
@@ -360,6 +454,13 @@ Motion uses Qt's frame clock and elapsed time. Hardware rendering on Wayland def
 </details>
 
 Before submitting substantial code contributions, open an issue to discuss scope and contributor licensing. A patch does not transfer its copyright; future commercial distribution needs appropriate rights to contributed code and compliance with third-party licenses.
+
+## Known limitations
+
+- **macOS port is Apple Silicon only.** No Intel build is shipped; x86_64 macs are not supported.
+- **`spun-playback-and-ui` self-test is disabled on macOS.** The test resolves the music dialog through `findChild<QObject*>("musicDialog")`. On macOS that dialog is wrapped in a `Loader { active: false }` to work around a Qt 6.11 QML bug, so the lookup returns `nullptr` until the user clicks the dialog open. Linux runs against Qt 6.8 where the wrapping Loader is unnecessary and the test still passes there. Fixing this requires either walking up to the parent Loader in `src/main.cpp` or invoking `openMusicDialog()` from the test path.
+- **Ad-hoc signature, no notarisation.** Apple Silicon Macs running macOS 14 require the right-click → Open workaround on first launch; subsequent launches work normally. No Developer ID signature or Apple notarisation ticket is requested at this time.
+- **`Class X is implemented in both` warnings** appear on developer machines that have Homebrew's `qt` formula installed alongside the running Spun.app. See [Build on macOS](#install).
 
 ## License
 
