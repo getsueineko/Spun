@@ -139,7 +139,7 @@ Spun sources                              ~3.5 MB
 
 ---
 
-## 6. Day-by-day plan (kept from the original assessment)
+## 5. Day-by-day plan (kept from the original assessment)
 
 ```
 Day 1 — build script + linker patches           ✅ done
@@ -148,6 +148,28 @@ Day 3 — standalone bundle via macdeployqt + custom rpath/sign script   ✅ don
 Day 4 — QFileDialogOptions workaround + UI runs end-to-end   ✅ done
 Day 5 — README, Homebrew cask, CI, `--self-test` regression fix
 ```
+
+---
+
+## 4b. Verification log
+
+End-to-end check after the Lazy-loader fix:
+```
+$ xattr -dr com.apple.quarantine build/Spun.app
+xattr: [Errno 13] Permission denied: .../PrivacyInfo.xcprivacy   # harmless on inner files
+$ xattr build/Spun.app                                                # only 'com.apple.provenance' left
+com.apple.provenance
+$ open build/Spun.app                                                 # window opens
+$ ps aux | grep Spun.app
+neko  36814  40.8  1.1 489691520 187952  ??  S  ...  .../Spun.app/Contents/MacOS/Spun
+$ top -l 1 -pid 36814
+36814  Spun  0.0  00:06.22  25  5  526  187M  160K  31M  36814
+$ osascript -e 'tell application "System Events" to get visible processes' | grep -i spun
+ Spun
+```
+The process stays alive, eats ~190 MB RSS, runs 25 threads, opens 526 ports and consumes ~6 sec of CPU. `osascript` confirms it shows up as `Spun` in the foreground process list. Five `objc Class X is implemented in both` warnings show in the log — they come from `/opt/homebrew/lib` shadowing and are harmless on a clean user machine.
+
+`screencapture` from the shell does not capture the window — `osascript -e 'tell application "System Events" to get ...'` returns -1728 ("not allowed assistive access"), which is a per-shell host permission issue and not a Spun problem. To see the window visually, open Terminal.app on the user's actual display.
 
 ---
 
@@ -194,7 +216,7 @@ Spun/
 
 ---
 
-## 7. Original long-form plan (kept for reference)
+## 6. Original long-form plan (kept for reference)
 
 The original assessment sketched a 6-week plan at 2 hours/day. We're compressing that into single-session days because each "day" here is a build session of 1-3 hours of focused work, not a calendar day.
 
@@ -213,7 +235,7 @@ The full sketch (kept for reference, mostly superseded by what actually happened
 
 ---
 
-## 7. Useful commands when continuing
+## 8. Useful commands when continuing
 
 ```bash
 # Inspect the bundle
@@ -229,6 +251,10 @@ codesign --verify --deep --strict build/Spun.app
 # Direct launch (works in spite of "Class is implemented in both" warnings)
 ./build/Spun.app/Contents/MacOS/Spun
 
+# Launch via LaunchServices (needs Gatekeeper workaround — see below)
+xattr -dr com.apple.quarantine build/Spun.app
+open build/Spun.app
+
 # QML import debugging
 QT_DEBUG_PLUGINS=1 QT_LOGGING_RULES="qt.qml.import.debug=true" \
     ./build/Spun.app/Contents/MacOS/Spun
@@ -241,7 +267,7 @@ rm -rf build && cmake -S . -B build -G Ninja \
 
 ---
 
-## 8. Open questions to confirm with the user before Day 5
+## 7. Open questions to confirm with the user before Day 5
 
 - Do we want to bundle the C++ `macos_backend.mm` (MediaControls + Keychain + Window) for full feature parity, or stop at "best effort" given the user picked "minimize Swift, maximize Qt"?
 - Do we publish the Homebrew formula in `homebrew-cask` (requires accepting PR), in a personal tap, or as a downloadable `.dmg` from GitHub Releases?
