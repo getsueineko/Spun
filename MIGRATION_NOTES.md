@@ -5,12 +5,21 @@
 **Goal:** Full functional port with maximum compatibility; standalone `.app` bundle; Homebrew distribution.
 **Working language:** C++20 + Qt 6.8+; macOS-specific code in Objective-C++ (`.mm`).
 
-## 0. Status — macOS port v1
+## 0. Status — macOS port v1.1
 
-Tag `macos-port-v1` points at `3dd3f2d` and marks the first stable cut of
-the macOS port. End-to-end verified on macOS 14 arm64 with Homebrew Qt
-6.11.2:
+Tag `macos-port-v1.1` points at `83c1464` and is the first patch release
+on top of v1. It inherits everything from `macos-port-v1` (3dd3f2d) and
+adds:
 
+- macOS UI accent now follows `+[NSColor controlAccentColor]`
+  (`System Settings → Appearance → Accent color`). Every QML binding that
+  reads `theme.colors.accent` — play/pause, progress, focus rings,
+  queue selection background, active source tab, drag-drop indicator —
+  updates live, both via the `AppleColorPreferencesChangedNotification`
+  observer and a 5 s polling fallback that catches cases where the
+  distributed notification does not reach an ad-hoc-signed bundle.
+
+End-to-end verified on macOS 14 arm64 with Homebrew Qt 6.11.2:
 - standalone `build/Spun.app` (~235 MB) bundles all Qt frameworks and
   QML modules and launches into the full player UI;
 - build, package, ad-hoc sign and macdeployqt pipeline is reproducible
@@ -19,13 +28,14 @@ the macOS port. End-to-end verified on macOS 14 arm64 with Homebrew Qt
 - `ctest` passes every test that does not require a real audio device
   or D-Bus (`spun-desktop-media` excluded on macOS by design).
 
-Known limitations carried into v1: ad-hoc signature without
+Known limitations carried into v1.1: ad-hoc signature without
 notarisation (right-click → Open on first launch), Apple-Silicon-only,
 `spun-playback-and-ui` self-test skipped because of the FileDialog
 Loader wrapper, duplicate-class `objc` warnings on dev machines that
-have Homebrew `qt` installed.
+have Homebrew `qt` installed, the accent poll has up to ~5 s of latency
+on systems where the notification path is dropped.
 
-Open work for a future tag (none of this is required to ship v1):
+Open work for a future tag (none of this is required to ship v1.1):
 - Homebrew formula/cask;
 - `.github/workflows/macos.yml` to build and ctest on a macOS runner;
 - `spun-playback-and-ui` self-test (either walk up to the parent
@@ -180,6 +190,7 @@ Day 2 — .app bundle + Info.plist + icon          ✅ done
 Day 3 — standalone bundle via macdeployqt + custom rpath/sign script   ✅ done
 Day 4 — QFileDialogOptions workaround + UI runs end-to-end   ✅ done
 Day 5 — README, polish, queue panel / window-mask fixes        ✅ done (tagged macos-port-v1)
+Day 6 — macOS system accent (live + 5 s fallback)               ✅ done (tagged macos-port-v1.1)
 Future — Homebrew cask, CI, `--self-test` regression fix, Developer ID signing
 ```
 
