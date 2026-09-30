@@ -41,7 +41,17 @@ int main(int argc, char **argv) {
             .arg(i / 1000, 3, 10, QChar('0')).arg(i / 100, 3, 10, QChar('0'))
             .arg(i, 5, 10, QChar('0')).arg(i % 2 ? "WAV" : "wav");
         if (!makeWave(path)) return 1;
-        if (i == 0) firstFile = path;
+        if (i == 0) {
+            // Resolve the canonical path up front: production uses
+            // QFileInfo::canonicalFilePath() (which follows symlinks, e.g.
+            // macOS's /var -> /private/var on temp dirs), so compare against
+            // the same path the player will report, not the raw temp.path()
+            // string. Without this the test races the platform's symlink
+            // layout regardless of whether the importer actually sorts
+            // deterministically.
+            firstFile = QFileInfo(path).canonicalFilePath();
+            if (firstFile.isEmpty()) firstFile = path;
+        }
         struct stat info{};
         if (::stat(QFile::encodeName(path).constData(), &info) == 0) physicalBytes += quint64(info.st_blocks) * 512;
     }

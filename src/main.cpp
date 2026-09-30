@@ -1568,8 +1568,25 @@ static int exercise(Player &player, Theme &theme, Lyrics &lyrics, QQuickWindow *
     }
     player.clear(); check(player.count() == 0 && player.currentIndex() == -1, "clear stops and resets player");
     click("addMusicButton");
-    auto *dialog = window->findChild<QObject *>("musicDialog");
-    check(dialog && waitFor([&] { return dialog->property("visible").toBool(); }), "add button opens music chooser");
+    // The music FileDialog is wrapped in a Loader with active:false to dodge a
+    // Qt 6.11 QFileDialogOptions eager-construction quirk, so the dialog does
+    // not exist until the Add Music button activates the Loader. Drive the
+    // same public UI action a user would, wait for the Loader to finish
+    // instantiating its item, and assert on the item's visibility rather than
+    // on a child-of-root lookup that would race the asynchronous load.
+    auto *loader = window->findChild<QObject *>("musicLoader");
+    check(loader, "music Loader is reachable from the window");
+    QObject *dialog = nullptr;
+    if (loader) {
+        check(waitFor([&] {
+            return loader->property("item").value<QObject *>() != nullptr;
+        }), "Add Music activates the Loader and instantiates the FileDialog");
+        dialog = loader->property("item").value<QObject *>();
+        if (dialog) {
+            check(waitFor([&] { return dialog->property("visible").toBool(); }),
+                  "Add Music opens the music chooser");
+        }
+    }
     if (dialog) QMetaObject::invokeMethod(dialog, "close");
     window->setProperty("queueOpen", false); QTest::qWait(200);
     const QImage grab = window->grabWindow();

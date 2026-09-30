@@ -606,6 +606,7 @@ ApplicationWindow {
     // longer explanation.
     Loader {
         id: filesLoader
+        objectName: "musicLoader"
         active: false
         sourceComponent: FileDialog {
             id: files
