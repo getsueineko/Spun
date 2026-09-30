@@ -1,5 +1,7 @@
 #include "macosaccent.h"
 
+#include <QTimer>
+
 #ifdef Q_OS_MACOS
 #import <Cocoa/Cocoa.h>
 
@@ -26,6 +28,9 @@ QColor readSystemAccent() {
 struct MacosAccent::Private {
 #ifdef Q_OS_MACOS
     id observerToken = nil; // Opaque observer token returned by NSDistributedNotificationCenter.
+    QTimer *poller = nullptr; // Fallback poll in case the distributed
+                              // notification does not arrive (some macOS
+                              // builds or signed bundles drop it).
 #endif
 };
 
@@ -47,6 +52,17 @@ MacosAccent::MacosAccent(QObject *parent)
                         (void)note;
                         if (MacosAccent *strong = weakSelf) strong->refresh();
                     }];
+    // Some macOS configurations do not deliver
+    // AppleColorPreferencesChangedNotification (notably when the user
+    // changes the accent without focus leaving System Settings). A 5 s poll
+    // is cheap (one +controlAccentColor + QColor comparison) and covers the
+    // gap; refresh() is a no-op when the value did not change, so bindings
+    // are not re-evaluated spuriously.
+    d->poller = new QTimer(this);
+    d->poller->setInterval(5000);
+    d->poller->setTimerType(Qt::VeryCoarseTimer);
+    QObject::connect(d->poller, &QTimer::timeout, this, &MacosAccent::refresh);
+    d->poller->start();
 #endif
 }
 
@@ -56,6 +72,11 @@ MacosAccent::~MacosAccent() {
         [[NSDistributedNotificationCenter defaultCenter]
             removeObserver:d->observerToken];
         d->observerToken = nil;
+    }
+    if (d->poller) {
+        d->poller->stop();
+        d->poller->deleteLater();
+        d->poller = nullptr;
     }
 #endif
     delete d;

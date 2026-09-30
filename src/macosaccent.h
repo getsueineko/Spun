@@ -2,6 +2,8 @@
 #include <QColor>
 #include <QObject>
 
+class QTimer;
+
 // macOS-only helper that surfaces the system's accent colour to QML/C++.
 // On non-macOS platforms the singleton still exists but reports a default
 // colour and never emits colorChanged, so callers can wire it up
@@ -25,3 +27,4 @@ private:
     Private *d;
     QColor m_color;
 };
+
