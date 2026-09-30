@@ -222,8 +222,24 @@ public:
         region |= QRegion(73, 419, 384, 80);
         if (queue) {
             const auto *panelName = window->property("libraryOpen").toBool() ? (window->property("useYoutube").toBool() ? "youtubePanel" : "libraryPanel") : "queuePanel";
-            if (auto *panel = window->findChild<QQuickItem *>(panelName))
+            if (auto *panel = window->findChild<QQuickItem *>(panelName)) {
                 region |= itemRegion(panel);
+                // Without a connecting band between the player housing and the
+                // side panel, the window mask leaves a transparent strip there
+                // and the panel looks like its left edge is clipped. Bridge
+                // from the player deck (or the housing's right edge) to the
+                // panel's left edge, vertically aligned with the panel.
+                if (auto *deck = window->findChild<QQuickItem *>("playerDeck")) {
+                    const auto panelRect = itemRegion(panel).boundingRect();
+                    const auto deckRect = itemRegion(deck).boundingRect();
+                    const int x1 = qMin(deckRect.right(), panelRect.left() - 1);
+                    const int x2 = panelRect.left();
+                    const int y1 = qMax(deckRect.top(), panelRect.top());
+                    const int y2 = qMin(deckRect.bottom(), panelRect.bottom());
+                    if (x2 > x1 && y2 > y1)
+                        region |= QRegion(x1, y1, x2 - x1, y2 - y1);
+                }
+            }
         }
         setMask(region);
     }
