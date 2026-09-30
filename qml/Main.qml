@@ -1574,13 +1574,11 @@ ApplicationWindow {
         id: jewelCase
         objectName: "queuePanel"
         x: root.playerWidth + 4; width: 310; anchors.top: badge.top; anchors.bottom: deck.bottom; radius: SpunStyle.panelRadius
-        // Without clipping, child rows overlap the panel's rounded corners and the
-        // background rectangle of the selected row spills into the corner curve,
-        // making the row look like it has square top-left / bottom-left corners
-        // (the right side stays round because the vertical scrollbar shifts the
-        // rows away from the right edge, breaking the symmetry). Clipping by the
-        // panel's radius lets each row keep its own corner radius while the panel
-        // shape wins at the boundary.
+        // Track rows live inside the panel radius; without clipping the row
+        // rectangles draw over the panel's rounded corners and the panel's
+        // own background shows through the corner curve as a hard vertical
+        // line on the row's left edge (the right side stays clean only because
+        // the vertical scrollbar shifts the rows away from the right edge).
         clip: true
         visible: root.queueOpen; color: root.surface; border.width: 0
         transform: Translate { id: queueEntrance; x: 0 }
