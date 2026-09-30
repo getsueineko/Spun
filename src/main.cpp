@@ -154,7 +154,17 @@ public:
         QTransform zoom;zoom.scale(scale,scale);
         const auto setMask=[&](const QRegion &region){window->setMask(zoom.map(region));};
         const auto itemRegion=[&](QQuickItem *item){
-            const auto rect=item->mapRectToScene(item->boundingRect());
+            // Use the item's local x/y/width/height mapped through its parent
+            // instead of mapRectToScene(boundingRect()). mapRectToScene applies
+            // the item's own transform, so any in-progress Translate animation
+            // (such as the queue panel's entrance from x=12 to x=0) would
+            // freeze the window mask at the animated offset. Mapping through
+            // the parent skips the item's transform and reports the final /
+            // static geometry, which is what the window shape needs to track.
+            auto *parent = item->parentItem();
+            const QRectF local(item->x(), item->y(), item->width(), item->height());
+            const QRectF rect = parent ? parent->mapRectToScene(local)
+                                       : item->mapRectToScene(local);
             return QRegion(QRectF(rect.x()/scale,rect.y()/scale,rect.width()/scale,rect.height()/scale).toAlignedRect());
         };
         window->setMinimumWidth(0);
