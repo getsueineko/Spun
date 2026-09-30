@@ -636,13 +636,13 @@ ApplicationWindow {
         function onAddFolderTriggered() { root.openFolderDialog() }
         function onToggleSidebar() { root.libraryOpen = !root.libraryOpen }
         function onToggleQueue() { root.queueOpen = !root.queueOpen }
-        function onToggleMini() { root.player.miniMode = !root.player.miniMode }
+        function onToggleMini() { player.miniMode = !player.miniMode }
         function onPlayPause() { root.togglePlayback() }
         function onPreviousTrack() { root.deckPlayer.previous() }
         function onNextTrack() { root.deckPlayer.next() }
         function onToggleShuffle() { root.toggleShuffle() }
         function onCycleRepeat() { root.cycleRepeat() }
-        function onSetMedium(medium) { root.player.medium = medium }
+        function onSetMedium(medium) { player.medium = medium }
         function onHelpTriggered() { root.helpOpen = true }
     }
     Connections {
