@@ -625,9 +625,11 @@ ApplicationWindow {
     onClosing: player.save()
     // macOS native application menu bar: route its choices through the same
     // public methods the QML buttons use. macosMenuBar is set as a context
-    // property from src/main.cpp and is undefined on other platforms.
+    // property in src/main.cpp before engine.load, so it is always defined
+    // when this QML is parsed on macOS; on other platforms it is undefined
+    // and Connections simply does not bind anything.
     Connections {
-        target: typeof macosMenuBar !== "undefined" ? macosMenuBar : null
+        target: macosMenuBar
         function onAboutTriggered() { root.showAboutDialog() }
         function onSettingsTriggered() { root.openSettings() }
         function onAddMusicTriggered() { root.openMusicDialog() }
@@ -640,13 +642,18 @@ ApplicationWindow {
         function onNextTrack() { root.deckPlayer.next() }
         function onToggleShuffle() { root.toggleShuffle() }
         function onCycleRepeat() { root.cycleRepeat() }
+        function onSetMedium(medium) { root.player.medium = medium }
         function onHelpTriggered() { root.helpOpen = true }
     }
     Connections {
         target: root.deckPlayer
-        function onPlayingChanged() { if (typeof macosMenuBar !== "undefined") macosMenuBar.setPlaybackPlaying(root.deckPlayer.playing) }
-        function onShuffleChanged() { if (typeof macosMenuBar !== "undefined") macosMenuBar.setShuffleChecked(root.deckPlayer.shuffle) }
-        function onRepeatModeChanged() { if (typeof macosMenuBar !== "undefined") macosMenuBar.setRepeatMode(root.deckPlayer.repeatMode) }
+        function onPlayingChanged() { if (macosMenuBar) macosMenuBar.setPlaybackPlaying(root.deckPlayer.playing) }
+        function onShuffleChanged() { if (macosMenuBar) macosMenuBar.setShuffleChecked(root.deckPlayer.shuffle) }
+        function onRepeatModeChanged() { if (macosMenuBar) macosMenuBar.setRepeatMode(root.deckPlayer.repeatMode) }
+    }
+    Connections {
+        target: player
+        function onMediumChanged() { if (macosMenuBar) macosMenuBar.setMediumActive(player.medium) }
     }
 
     Rectangle {

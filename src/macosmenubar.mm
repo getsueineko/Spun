@@ -32,6 +32,10 @@
 - (void)emitToggleMini:(id)sender;
 - (void)emitBringAllToFront:(id)sender;
 - (void)emitHelp:(id)sender;
+- (void)emitMediumCD:(id)sender;
+- (void)emitMediumVinyl:(id)sender;
+- (void)emitMediumCassette:(id)sender;
+- (void)emitMediumTP7:(id)sender;
 @end
 
 @implementation SpunMenuActions
@@ -54,6 +58,10 @@
 - (void)emitToggleMini:(id)sender { if (_owner) emit _owner->toggleMini(); }
 - (void)emitBringAllToFront:(id)sender { [NSApp arrangeInFront:nil]; }
 - (void)emitHelp:(id)sender { if (_owner) emit _owner->helpTriggered(); }
+- (void)emitMediumCD:(id)sender { if (_owner) emit _owner->setMedium("cd"); }
+- (void)emitMediumVinyl:(id)sender { if (_owner) emit _owner->setMedium("vinyl"); }
+- (void)emitMediumCassette:(id)sender { if (_owner) emit _owner->setMedium("cassette"); }
+- (void)emitMediumTP7:(id)sender { if (_owner) emit _owner->setMedium("tp7"); }
 @end
 
 // Synthesize the [NSApp hide:nil] / terminate: helpers above do not need
@@ -68,6 +76,10 @@ struct MacosMenuBar::Private {
     NSMenuItem *repeatItem = nil;
     NSMenuItem *sidebarItem = nil;
     NSMenuItem *queueItem = nil;
+    NSMenuItem *cdItem = nil;
+    NSMenuItem *vinylItem = nil;
+    NSMenuItem *cassetteItem = nil;
+    NSMenuItem *tp7Item = nil;
 #endif
 };
 
@@ -126,6 +138,17 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
                                    @selector(emitToggleSidebar:), @"\\", NSCommandKeyMask);
     d->queueItem = addSignalItem(viewMenu, @"Show Queue",
                                  @selector(emitToggleQueue:), @"l", NSCommandKeyMask);
+    [viewMenu addItem:[NSMenuItem separatorItem]];
+    NSMenu *playerMenu = [[NSMenu alloc] initWithTitle:@"Player Type"];
+    NSMenuItem *playerItem = [[NSMenuItem alloc] initWithTitle:@"Player Type"
+                                                          action:nil
+                                                   keyEquivalent:@""];
+    [playerItem setSubmenu:playerMenu];
+    [viewMenu addItem:playerItem];
+    d->cdItem      = addSignalItem(playerMenu, @"CD",      @selector(emitMediumCD:),      @"1", NSCommandKeyMask);
+    d->vinylItem   = addSignalItem(playerMenu, @"Vinyl",   @selector(emitMediumVinyl:),   @"2", NSCommandKeyMask);
+    d->cassetteItem= addSignalItem(playerMenu, @"Cassette",@selector(emitMediumCassette:),@"3", NSCommandKeyMask);
+    d->tp7Item     = addSignalItem(playerMenu, @"TP-7",    @selector(emitMediumTP7:),     @"4", NSCommandKeyMask);
 
     NSMenu *playMenu = [[NSMenu alloc] initWithTitle:@"Playback"];
     NSMenuItem *playItem = [[NSMenuItem alloc] init];
@@ -231,5 +254,18 @@ void MacosMenuBar::setQueueVisible(bool visible) {
     [d->queueItem setTitle:visible ? @"Hide Queue" : @"Show Queue"];
     [d->queueItem setState:visible ? NSControlStateValueOn
                                    : NSControlStateValueOff];
+#endif
+}
+
+void MacosMenuBar::setMediumActive(const QString &medium) {
+#ifdef Q_OS_MACOS
+    auto apply = [](NSMenuItem *item, bool on) {
+        if (!item) return;
+        [item setState:on ? NSControlStateValueOn : NSControlStateValueOff];
+    };
+    apply(d->cdItem,       medium == QLatin1String("cd"));
+    apply(d->vinylItem,    medium == QLatin1String("vinyl"));
+    apply(d->cassetteItem, medium == QLatin1String("cassette"));
+    apply(d->tp7Item,      medium == QLatin1String("tp7"));
 #endif
 }

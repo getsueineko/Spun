@@ -29,6 +29,9 @@ public:
     Q_INVOKABLE void setRepeatMode(int mode); // 0=None, 1=All, 2=One
     Q_INVOKABLE void setSidebarVisible(bool visible);
     Q_INVOKABLE void setQueueVisible(bool visible);
+    // Mark which Player Type entry matches the current Player.medium.
+    // Accepts: "cd" | "vinyl" | "cassette" | "tp7".
+    Q_INVOKABLE void setMediumActive(const QString &medium);
 
 signals:
     // Spun
@@ -42,6 +45,8 @@ signals:
     void toggleQueue();
     // Window
     void toggleMini();
+    // View > Player Type
+    void setMedium(const QString &medium);
     // Playback
     void playPause();
     void previousTrack();

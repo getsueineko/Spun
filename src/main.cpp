@@ -1828,20 +1828,21 @@ int main(int argc, char **argv) {
             });
     });
     if(test) player.setShowPlayerBody(false);
+#ifdef Q_OS_MACOS
+    // Build the native macOS application menu bar (Spun / File / View /
+    // Playback / Window / Help) and expose it BEFORE engine.load so the
+    // QML 'Connections { target: macosMenuBar }' bindings find a real
+    // target the moment Main.qml is parsed. attachToWindow runs after
+    // load because it needs the QQuickWindow.
+    MacosMenuBar macosMenuBar;
+    engine.rootContext()->setContextProperty("macosMenuBar", &macosMenuBar);
+#endif
     engine.load(QUrl("qrc:/qml/Main.qml"));
     qmlReady = startup.elapsed();
     if (engine.rootObjects().isEmpty()) return 1;
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
 #ifdef Q_OS_MACOS
-    // Build the native macOS application menu bar (Spun / File / View /
-    // Playback / Window / Help). QML wires the signals to its own public
-    // methods through the 'macosMenuBar' context property and keeps the
-    // menu's dynamic labels / checkmarks in sync with live state. The QML
-    // Shortcut entries remain so keyboard users keep working without
-    // hovering the menu bar.
-    MacosMenuBar macosMenuBar;
     macosMenuBar.attachToWindow(window);
-    engine.rootContext()->setContextProperty("macosMenuBar", &macosMenuBar);
 #endif
     if (test && qEnvironmentVariableIsSet("SPUN_TEST_SCREEN")) {
         const auto name=qEnvironmentVariable("SPUN_TEST_SCREEN");
