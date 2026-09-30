@@ -5,6 +5,39 @@
 **Goal:** Full functional port with maximum compatibility; standalone `.app` bundle; Homebrew distribution.
 **Working language:** C++20 + Qt 6.8+; macOS-specific code in Objective-C++ (`.mm`).
 
+## 0. Status — macOS port v1
+
+Tag `macos-port-v1` points at `3dd3f2d` and marks the first stable cut of
+the macOS port. End-to-end verified on macOS 14 arm64 with Homebrew Qt
+6.11.2:
+
+- standalone `build/Spun.app` (~235 MB) bundles all Qt frameworks and
+  QML modules and launches into the full player UI;
+- build, package, ad-hoc sign and macdeployqt pipeline is reproducible
+  via `scripts/build-macos.sh` and `scripts/sign-macos-bundle.sh`;
+- README documents install, first-launch, build and known limits;
+- `ctest` passes every test that does not require a real audio device
+  or D-Bus (`spun-desktop-media` excluded on macOS by design).
+
+Known limitations carried into v1: ad-hoc signature without
+notarisation (right-click → Open on first launch), Apple-Silicon-only,
+`spun-playback-and-ui` self-test skipped because of the FileDialog
+Loader wrapper, duplicate-class `objc` warnings on dev machines that
+have Homebrew `qt` installed.
+
+Open work for a future tag (none of this is required to ship v1):
+- Homebrew formula/cask;
+- `.github/workflows/macos.yml` to build and ctest on a macOS runner;
+- `spun-playback-and-ui` self-test (either walk up to the parent
+  `Loader` in `src/main.cpp:1544` or invoke `openMusicDialog()` from
+  the test path);
+- fix `ctest` `COMMAND spun --<test>` entries that fall back through
+  `execv("spun-diagnostics")` — on macOS the `spun` binary lives only
+  inside `Spun.app`, so ctest can't find it next to `spun-diagnostics`;
+- sort `readdir` results in the importer so `spun-folder-import` stops
+  asserting on APFS's non-deterministic directory ordering;
+- signing with a Developer ID + notarisation.
+
 This document is a continuation handoff: it assumes you are a fresh agent
 with no prior context, and tells you everything you need to pick up where
 the previous session left off.
@@ -146,7 +179,8 @@ Day 1 — build script + linker patches           ✅ done
 Day 2 — .app bundle + Info.plist + icon          ✅ done
 Day 3 — standalone bundle via macdeployqt + custom rpath/sign script   ✅ done
 Day 4 — QFileDialogOptions workaround + UI runs end-to-end   ✅ done
-Day 5 — README, Homebrew cask, CI, `--self-test` regression fix
+Day 5 — README, polish, queue panel / window-mask fixes        ✅ done (tagged macos-port-v1)
+Future — Homebrew cask, CI, `--self-test` regression fix, Developer ID signing
 ```
 
 ---
