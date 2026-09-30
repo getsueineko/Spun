@@ -5,47 +5,70 @@
 **Goal:** Full functional port with maximum compatibility; standalone `.app` bundle; Homebrew distribution.
 **Working language:** C++20 + Qt 6.8+; macOS-specific code in Objective-C++ (`.mm`).
 
-## 0. Status — macOS port v1.1
+## 0. Status — macOS port v1.2
 
-Tag `macos-port-v1.1` points at `83c1464` and is the first patch release
-on top of v1. It inherits everything from `macos-port-v1` (3dd3f2d) and
-adds:
+Tag `macos-port-v1.2` points at `54d3552` and is the second patch release
+on top of v1.1. It inherits everything from `macos-port-v1.1` (83c1464)
+and `macos-port-v1` (3dd3f2d) and adds:
 
-- macOS UI accent now follows `+[NSColor controlAccentColor]`
-  (`System Settings → Appearance → Accent color`). Every QML binding that
-  reads `theme.colors.accent` — play/pause, progress, focus rings,
-  queue selection background, active source tab, drag-drop indicator —
-  updates live, both via the `AppleColorPreferencesChangedNotification`
-  observer and a 5 s polling fallback that catches cases where the
-  distributed notification does not reach an ad-hoc-signed bundle.
+- Native macOS application menu bar (Spun / File / View / Playback /
+  Window / Help) installed via `[NSApp setMainMenu:]` from a new
+  `MacosMenuBar` Objective-C++ helper. Cocoa target/action needs an
+  NSObject target, so a tiny `SpunMenuActions : NSObject` proxy
+  forwards each menu choice as a Qt signal; QML routes those signals
+  through the same public methods the in-window buttons use, so
+  deck status, library / queue panels, focus and recent actions stay
+  consistent regardless of how the action was triggered. Standard
+  macOS key equivalents are wired (Cmd+Q / Cmd+H / Cmd+W / Cmd+M /
+  Cmd+O / Cmd+Shift+O / Cmd+L / Cmd+\\ / Cmd+Shift+S / Cmd+Shift+R /
+  Cmd+, / Space).
+- About Spun: a quiet in-app Popup with the app version and a Close
+  button, opened from the macOS Spun menu.
+- View > Show Sidebar / Show Queue and Playback > Shuffle / Repeat
+  have their titles and check marks kept in sync with live QML state,
+  including the cycle 0 → 1 → 2 → 0 for repeat (None / All / One).
+- `spun-youtube`, `spun-playback-and-ui` and `spun-immersive-media-ui`
+  now route through `$<TARGET_FILE:spun-diagnostics>` instead of
+  relying on src/main.cpp's `/proc/self/exe` execv into a sibling
+  binary that does not exist inside the macOS `.app` bundle. The
+  user-facing `spun --<test>` path is unchanged.
+- `spun-playback-and-ui` self-test now waits for the music Loader to
+  finish instantiating its `FileDialog` and then asserts on the
+  item's `visible`, rather than racing a `findChild` against the
+  asynchronous load. A new `objectName: "musicLoader"` is the only
+  QML change.
+- `spun-folder-import` now passes on macOS: the test stores
+  `QFileInfo(path).canonicalFilePath()` so it compares against the
+  same path the player reports (`/var/folders/...` on macOS vs
+  `/private/var/folders/...` after symlink resolution). Production
+  was already sorting the flattened file list with `std::sort`
+  (src/player.cpp:256); no production change required.
 
 End-to-end verified on macOS 14 arm64 with Homebrew Qt 6.11.2:
 - standalone `build/Spun.app` (~235 MB) bundles all Qt frameworks and
   QML modules and launches into the full player UI;
+- `[NSApp mainMenu]` receives 6 top-level menus with the expected
+  sub-items, key equivalents and live state binding;
 - build, package, ad-hoc sign and macdeployqt pipeline is reproducible
   via `scripts/build-macos.sh` and `scripts/sign-macos-bundle.sh`;
 - README documents install, first-launch, build and known limits;
 - `ctest` passes every test that does not require a real audio device
   or D-Bus (`spun-desktop-media` excluded on macOS by design).
+  `spun-folder-import`: 0/23 failures. `spun-playback-and-ui`: Add
+  Music loader wait now passes; remaining failures are all in the
+  real-audio bucket already documented in v1.
 
-Known limitations carried into v1.1: ad-hoc signature without
+Known limitations carried into v1.2: ad-hoc signature without
 notarisation (right-click → Open on first launch), Apple-Silicon-only,
-`spun-playback-and-ui` self-test skipped because of the FileDialog
-Loader wrapper, duplicate-class `objc` warnings on dev machines that
-have Homebrew `qt` installed, the accent poll has up to ~5 s of latency
-on systems where the notification path is dropped.
+duplicate-class `objc` warnings on dev machines that have Homebrew
+`qt` installed, the accent poll has up to ~5 s of latency where the
+notification path is dropped, real-audio-dependent ctest cases
+(YouTube playback, Jellyfin / Subsonic keyring, RemoteLibrary
+playback) remain skipped on macOS.
 
-Open work for a future tag (none of this is required to ship v1.1):
+Open work for a future tag (none of this is required to ship v1.2):
 - Homebrew formula/cask;
 - `.github/workflows/macos.yml` to build and ctest on a macOS runner;
-- `spun-playback-and-ui` self-test (either walk up to the parent
-  `Loader` in `src/main.cpp:1544` or invoke `openMusicDialog()` from
-  the test path);
-- fix `ctest` `COMMAND spun --<test>` entries that fall back through
-  `execv("spun-diagnostics")` — on macOS the `spun` binary lives only
-  inside `Spun.app`, so ctest can't find it next to `spun-diagnostics`;
-- sort `readdir` results in the importer so `spun-folder-import` stops
-  asserting on APFS's non-deterministic directory ordering;
 - signing with a Developer ID + notarisation.
 
 This document is a continuation handoff: it assumes you are a fresh agent
@@ -191,7 +214,8 @@ Day 3 — standalone bundle via macdeployqt + custom rpath/sign script   ✅ don
 Day 4 — QFileDialogOptions workaround + UI runs end-to-end   ✅ done
 Day 5 — README, polish, queue panel / window-mask fixes        ✅ done (tagged macos-port-v1)
 Day 6 — macOS system accent (live + 5 s fallback)               ✅ done (tagged macos-port-v1.1)
-Future — Homebrew cask, CI, `--self-test` regression fix, Developer ID signing
+Day 7 — native macOS app menu bar + ctest regressions fixed     ✅ done (tagged macos-port-v1.2)
+Future — Homebrew cask, CI, Developer ID signing
 ```
 
 ---
