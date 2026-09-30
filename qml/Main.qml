@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
+import QtQuick.Layouts
 import Spun 1.0
 
 ApplicationWindow {
@@ -363,6 +364,7 @@ ApplicationWindow {
         if (libraryOpen) { player.miniMode = false; queueOpen = false; closeQueueSearch() }
         syncLibrary()
         Qt.callLater(updateMask)
+        if (typeof macosMenuBar !== "undefined") macosMenuBar.setSidebarVisible(libraryOpen)
     }
     function openMusicLink(text, clipboard) {
         if(useYoutube){if(clipboard)youtube.openClipboardLink();else youtube.search(text);libraryOpen=true;return true}
@@ -560,12 +562,91 @@ ApplicationWindow {
         menu.y = Qt.binding(function() { return Math.max(12,deck.y - menu.height - 10) })
         songMenu.close(); musicBrowser.closeActions(); menu.open()
     }
-    onQueueOpenChanged: { clearQueueSelection(); if (queueOpen) { queuePrepared = true; trackList.following = true }; queueMenu.close(); cancelQueueDrag(); if (queueOpen) libraryOpen = false; if (!queueOpen) closeQueueSearch(); if (queueOpen && miniMode) player.miniMode = false; root.ciderService.queueVisible = queueOpen && useCider; Qt.callLater(updateMask) }
+    function showAboutDialog() {
+        // The native macOS App menu owns the About item. Show it as a quiet
+        // overlay rather than a modal popup so the menu bar can keep focus.
+        if (!aboutPopup) aboutPopup = aboutPopupComponent.createObject(root)
+        if (aboutPopup) aboutPopup.open()
+    }
+    Component {
+        id: aboutPopupComponent
+        Popup {
+            id: popup
+            objectName: "aboutDialog"
+            modal: true; focus: true; padding: 24
+            x: (root.width - width) / 2; y: (root.height - height) / 2
+            width: 360
+            background: Rectangle { color: root.surface; radius: SpunStyle.dialogRadius; border.width: 1; border.color: root.hairline }
+            contentItem: ColumnLayout {
+                spacing: 12
+                SpunText { text: "Spun"; font.pixelSize: SpunStyle.title; font.weight: Font.Medium; color: root.ink; Layout.alignment: Qt.AlignHCenter }
+                SpunText {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "Version " + (Qt.platform.os === "osx" ? Qt.application.version : Qt.application.version)
+                    color: root.mutedInk; font.pixelSize: SpunStyle.body
+                }
+                SpunText {
+                    Layout.alignment: Qt.AlignHCenter; horizontalAlignment: Text.AlignHCenter
+                    Layout.fillWidth: true
+                    text: "A music player with CD, vinyl, cassette and recorder views."
+                    color: root.mutedInk; font.pixelSize: SpunStyle.caption; wrapMode: Text.WordWrap
+                }
+                SpunButton {
+                    objectName: "aboutClose"
+                    text: "Close"; tonal: true
+                    Layout.alignment: Qt.AlignHCenter
+                    onClicked: popup.close()
+                }
+            }
+        }
+    }
+    property var aboutPopup: null
+    function togglePlayback() {
+        // Mirror the Space shortcut: prefer the deck player when it has
+        // something loaded, otherwise fall through to library/Cider/music.
+        if (root.deckPlayer.count) { root.deckPlayer.toggle(); return }
+        if (root.useYoutube || root.useServer) { root.openLibrary(); return }
+        if (root.useCider) { root.ciderService.toggle(); return }
+        root.openMusicDialog()
+    }
+    function toggleShuffle() { root.deckPlayer.shuffle = !root.deckPlayer.shuffle }
+    function cycleRepeat() { root.deckPlayer.repeatMode = (root.deckPlayer.repeatMode + 1) % 3 }
+    onQueueOpenChanged: {
+        clearQueueSelection(); if (queueOpen) { queuePrepared = true; trackList.following = true }
+        queueMenu.close(); cancelQueueDrag(); if (queueOpen) libraryOpen = false
+        if (!queueOpen) closeQueueSearch(); if (queueOpen && miniMode) player.miniMode = false
+        root.ciderService.queueVisible = queueOpen && useCider; Qt.callLater(updateMask)
+        if (typeof macosMenuBar !== "undefined") macosMenuBar.setQueueVisible(queueOpen)
+    }
     onHelpOpenChanged: { if (helpOpen && miniMode) player.miniMode = false; Qt.callLater(updateMask) }
     onMenuOpenChanged: Qt.callLater(updateMask)
     onWidthChanged: Qt.callLater(updateMask)
     Component.onCompleted: { if (!testMode && player.ciderAutoStart) { useCider = true; root.ciderService.ensureRunning() }; updateMask(); platformNative.place(root); Qt.callLater(presentDisc); syncLyrics() }
     onClosing: player.save()
+    // macOS native application menu bar: route its choices through the same
+    // public methods the QML buttons use. macosMenuBar is set as a context
+    // property from src/main.cpp and is undefined on other platforms.
+    Connections {
+        target: typeof macosMenuBar !== "undefined" ? macosMenuBar : null
+        function onAboutTriggered() { root.showAboutDialog() }
+        function onSettingsTriggered() { root.openSettings() }
+        function onAddMusicTriggered() { root.openMusicDialog() }
+        function onAddFolderTriggered() { root.openFolderDialog() }
+        function onToggleSidebar() { root.libraryOpen = !root.libraryOpen }
+        function onToggleQueue() { root.queueOpen = !root.queueOpen }
+        function onPlayPause() { root.togglePlayback() }
+        function onPreviousTrack() { root.deckPlayer.previous() }
+        function onNextTrack() { root.deckPlayer.next() }
+        function onToggleShuffle() { root.toggleShuffle() }
+        function onCycleRepeat() { root.cycleRepeat() }
+        function onHelpTriggered() { root.helpOpen = true }
+    }
+    Connections {
+        target: root.deckPlayer
+        function onPlayingChanged() { if (typeof macosMenuBar !== "undefined") macosMenuBar.setPlaybackPlaying(root.deckPlayer.playing) }
+        function onShuffleChanged() { if (typeof macosMenuBar !== "undefined") macosMenuBar.setShuffleChecked(root.deckPlayer.shuffle) }
+        function onRepeatModeChanged() { if (typeof macosMenuBar !== "undefined") macosMenuBar.setRepeatMode(root.deckPlayer.repeatMode) }
+    }
 
     Rectangle {
         objectName: "blurBackdrop"

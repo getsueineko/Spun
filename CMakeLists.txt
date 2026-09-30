@@ -50,7 +50,8 @@ qt_add_library(spun_core STATIC
     src/player.cpp src/player.h src/disc.cpp src/disc.h src/recorder.cpp src/recorder.h src/playerbody.cpp src/playerbody.h src/mpris.cpp src/mpris.h
     src/theme.cpp src/theme.h src/cider.cpp src/cider.h src/ciderevents.cpp src/ciderevents.h)
 if(APPLE)
-    target_sources(spun_core PRIVATE src/macosaccent.mm src/macosaccent.h)
+    target_sources(spun_core PRIVATE src/macosaccent.mm src/macosaccent.h
+                                     src/macosmenubar.mm src/macosmenubar.h)
     target_link_libraries(spun_core PRIVATE "-framework Cocoa" "-framework AppKit")
 endif()
 target_link_libraries(spun_core PUBLIC Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
