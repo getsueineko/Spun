@@ -5,6 +5,65 @@
 **Goal:** Full functional port with maximum compatibility; standalone `.app` bundle; Homebrew distribution.
 **Working language:** C++20 + Qt 6.8+; macOS-specific code in Objective-C++ (`.mm`).
 
+## 0. Status — macOS port v1.2.1
+
+Tag `macos-port-v1.2.1` points at `5034961` and is the third patch
+release on top of v1 (3dd3f2d). It inherits everything from
+`macos-port-v1.2` (54d3552), `macos-port-v1.1` (83c1464) and
+`macos-port-v1` (3dd3f2d), and fixes a bug introduced when the native
+application menu bar landed:
+
+- View > Player Type (CD / Vinyl / Cassette / TP-7) and Window > Mini
+  Mode silently did nothing when clicked. Every other layer of the
+  chain (NSMenuItem -> SpunMenuActions -> MacosMenuBar signal ->
+  QML Connections) was firing correctly; the slot body then aborted
+  with 'Cannot read property "miniMode" of undefined' on its very
+  first reference. Root cause: 'player' is a context property on
+  the QML root scope, not a property of root itself, so
+  'root.player.miniMode' asks the ApplicationWindow for a 'player'
+  property it does not declare. Fixed in qml/Main.qml by writing the
+  bare 'player.miniMode' / 'player.medium' identifiers, matching
+  every other access in the same file. Verified by direct signal
+  emission from Component.onCompleted during investigation: 'QML:
+  onToggleMini, before miniMode= false; after miniMode= true' and
+  'QML: onSetMedium cd' both fired and updated Player state.
+
+End-to-end verified on macOS 14 arm64 with Homebrew Qt 6.11.2:
+- standalone `build/Spun.app` (~235 MB) bundles all Qt frameworks and
+  QML modules and launches into the full player UI;
+- `[NSApp mainMenu]` receives 6 top-level menus (Spun, File, View,
+  Playback, Window, Help). All entries fire and reach Player /
+  Application state: Add Music / Add Folder, Show Sidebar / Show
+  Queue, Show Player Type > CD / Vinyl / Cassette / TP-7, Play /
+  Pause, Previous / Next, Shuffle, Repeat (cycles 0 -> 1 -> 2 -> 0),
+  Mini Mode (Cmd+M), Bring All to Front, About Spun, Settings,
+  Hide Spun / Hide Others / Show All, Quit Spun, Close Window,
+  Spun Help;
+- build, package, ad-hoc sign and macdeployqt pipeline is reproducible
+  via `scripts/build-macos.sh` and `scripts/sign-macos-bundle.sh`;
+- README documents install, first-launch, build and known limits;
+- `ctest` passes every test that does not require a real audio device
+  or D-Bus (`spun-desktop-media` excluded on macOS by design).
+  `spun-folder-import`: 0/23 failures. `spun-playback-and-ui`: Add
+  Music loader wait passes; remaining failures are all in the
+  real-audio bucket already documented in v1.
+
+Known limitations carried into v1.2.1: ad-hoc signature without
+notarisation (right-click -> Open on first launch), Apple-Silicon-only,
+duplicate-class `objc` warnings on dev machines that have Homebrew
+`qt` installed, the accent poll has up to ~5 s of latency where the
+notification path is dropped, real-audio-dependent ctest cases
+(YouTube playback, Jellyfin / Subsonic keyring, RemoteLibrary
+playback) remain skipped on macOS. The native macOS menu bar's
+Cmd+M shortcut is repurposed for Mini Mode (the standard macOS
+Minimize behaviour is intentionally not exposed in the Window
+menu) and Cmd+1..4 select Player Type.
+
+Open work for a future tag (none of this is required to ship v1.2.1):
+- Homebrew formula/cask;
+- `.github/workflows/macos.yml` to build and ctest on a macOS runner;
+- signing with a Developer ID + notarisation.
+
 ## 0. Status — macOS port v1.2
 
 Tag `macos-port-v1.2` points at `54d3552` and is the second patch release
@@ -215,6 +274,7 @@ Day 4 — QFileDialogOptions workaround + UI runs end-to-end   ✅ done
 Day 5 — README, polish, queue panel / window-mask fixes        ✅ done (tagged macos-port-v1)
 Day 6 — macOS system accent (live + 5 s fallback)               ✅ done (tagged macos-port-v1.1)
 Day 7 — native macOS app menu bar + ctest regressions fixed     ✅ done (tagged macos-port-v1.2)
+Day 8 — menu bar Player Type / Mini Mode handler scope fix        ✅ done (tagged macos-port-v1.2.1)
 Future — Homebrew cask, CI, Developer ID signing
 ```
 
