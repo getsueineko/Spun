@@ -158,3 +158,20 @@ void Theme::reload() {
     emit changed();
   }
 }
+void Theme::overrideAccent(const QColor &accent) {
+  if (!accent.isValid() || m_colors.isEmpty()) return;
+  const QColor prevAccent = m_colors.value("accent").value<QColor>();
+  if (prevAccent == accent) return;
+  const QColor bg = m_colors.value("surface").value<QColor>();
+  const QColor fg = m_colors.value("text").value<QColor>();
+  const QColor card = m_colors.value("card").value<QColor>();
+  m_colors["accent"] = accent;
+  m_colors["muted"] = supportingText(fg, bg, card, accent);
+  m_colors["onAccent"] = contrast(accent, fg) >= contrast(accent, QColor("#000000"))
+                             ? QColor("#ffffff") : QColor("#000000");
+  QPalette palette = qApp->palette();
+  palette.setColor(QPalette::Highlight, accent);
+  palette.setColor(QPalette::HighlightedText, m_colors["onAccent"].value<QColor>());
+  qApp->setPalette(palette);
+  emit changed();
+}

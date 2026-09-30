@@ -19,6 +19,14 @@ public:
   qreal radius() const { return m_radius; }
   qreal motionScale() const { return m_motion; }
   void reload();
+
+  // Override the "accent" entry without re-reading the TOML. Used by the
+  // macOS port to surface the system accent colour; recomputes "muted" and
+  // "onAccent" so dependent bindings (foreground text on accent backgrounds,
+  // selection tints) stay readable, refreshes QPalette, and emits changed()
+  // when something actually moved.
+  void overrideAccent(const QColor &accent);
+
 signals:
   void changed();
 

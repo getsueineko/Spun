@@ -49,6 +49,10 @@ qt_add_library(spun_core STATIC
     src/tx6.cpp src/tx6.h src/youtube.cpp src/youtube.h src/jellyfinapi.cpp src/jellyfinapi.h src/remotemusicapi.h src/remotelibrary.cpp src/remotelibrary.h src/jellyfin.h src/subsonicapi.cpp src/subsonicapi.h
     src/player.cpp src/player.h src/disc.cpp src/disc.h src/recorder.cpp src/recorder.h src/playerbody.cpp src/playerbody.h src/mpris.cpp src/mpris.h
     src/theme.cpp src/theme.h src/cider.cpp src/cider.h src/ciderevents.cpp src/ciderevents.h)
+if(APPLE)
+    target_sources(spun_core PRIVATE src/macosaccent.mm src/macosaccent.h)
+    target_link_libraries(spun_core PRIVATE "-framework Cocoa" "-framework AppKit")
+endif()
 target_link_libraries(spun_core PUBLIC Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
     Qt6::Svg Qt6::Multimedia Qt6::Concurrent Qt6::DBus Qt6::Network PkgConfig::TAGLIB)
 if(TARGET Qt6::Quick3D AND SPUN_ENABLE_3D)

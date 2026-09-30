@@ -40,6 +40,7 @@
 #include "symbol.h"
 #include "mpris.h"
 #include "theme.h"
+#include "macosaccent.h"
 #include "typography.h"
 #include "cider.h"
 #include <QGuiApplication>
@@ -1761,6 +1762,13 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("typography", &typography);
     engine.rootContext()->setContextProperty("platformNative", &native);
+    MacosAccent macosAccent;
+    engine.rootContext()->setContextProperty("macosAccent", &macosAccent);
+#ifdef Q_OS_MACOS
+    theme.overrideAccent(macosAccent.color());
+    QObject::connect(&macosAccent, &MacosAccent::colorChanged, &theme,
+                     [&] { theme.overrideAccent(macosAccent.color()); });
+#endif
     engine.rootContext()->setContextProperty("lyrics", &lyrics);
     engine.rootContext()->setContextProperty("presentation", &presentation);
     engine.rootContext()->setContextProperty("tapeSound", &tapeSound);
