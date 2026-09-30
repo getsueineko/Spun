@@ -29,8 +29,7 @@
 - (void)emitNext:(id)sender;
 - (void)emitToggleShuffle:(id)sender;
 - (void)emitCycleRepeat:(id)sender;
-- (void)emitMinimize:(id)sender;
-- (void)emitZoom:(id)sender;
+- (void)emitToggleMini:(id)sender;
 - (void)emitBringAllToFront:(id)sender;
 - (void)emitHelp:(id)sender;
 @end
@@ -52,8 +51,7 @@
 - (void)emitNext:(id)sender { if (_owner) emit _owner->nextTrack(); }
 - (void)emitToggleShuffle:(id)sender { if (_owner) emit _owner->toggleShuffle(); }
 - (void)emitCycleRepeat:(id)sender { if (_owner) emit _owner->cycleRepeat(); }
-- (void)emitMinimize:(id)sender { [[NSApp keyWindow] performMiniaturize:nil]; }
-- (void)emitZoom:(id)sender { [[NSApp keyWindow] performZoom:nil]; }
+- (void)emitToggleMini:(id)sender { if (_owner) emit _owner->toggleMini(); }
 - (void)emitBringAllToFront:(id)sender { [NSApp arrangeInFront:nil]; }
 - (void)emitHelp:(id)sender { if (_owner) emit _owner->helpTriggered(); }
 @end
@@ -150,8 +148,7 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
     NSMenuItem *windowItem = [[NSMenuItem alloc] init];
     [windowItem setSubmenu:windowMenu];
     [mainMenu addItem:windowItem];
-    addSignalItem(windowMenu, @"Minimize", @selector(emitMinimize:), @"m", NSCommandKeyMask);
-    addSignalItem(windowMenu, @"Zoom", @selector(emitZoom:), @"", NSCommandKeyMask);
+    addSignalItem(windowMenu, @"Mini Mode", @selector(emitToggleMini:), @"m", NSCommandKeyMask);
     [windowMenu addItem:[NSMenuItem separatorItem]];
     addSignalItem(windowMenu, @"Bring All to Front",
                   @selector(emitBringAllToFront:), @"", NSCommandKeyMask);

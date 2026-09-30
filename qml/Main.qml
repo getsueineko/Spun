@@ -634,6 +634,7 @@ ApplicationWindow {
         function onAddFolderTriggered() { root.openFolderDialog() }
         function onToggleSidebar() { root.libraryOpen = !root.libraryOpen }
         function onToggleQueue() { root.queueOpen = !root.queueOpen }
+        function onToggleMini() { root.player.miniMode = !root.player.miniMode }
         function onPlayPause() { root.togglePlayback() }
         function onPreviousTrack() { root.deckPlayer.previous() }
         function onNextTrack() { root.deckPlayer.next() }

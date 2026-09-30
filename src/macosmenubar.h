@@ -40,6 +40,8 @@ signals:
     // View
     void toggleSidebar();
     void toggleQueue();
+    // Window
+    void toggleMini();
     // Playback
     void playPause();
     void previousTrack();
