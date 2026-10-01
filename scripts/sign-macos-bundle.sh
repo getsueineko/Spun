@@ -24,9 +24,9 @@ codesign=/usr/bin/codesign
 
 # Restore execute permission on every framework and plugin binary. macdeployqt
 # copies them without the +x bit and Qt later refuses to dlopen them, which
-# surfaces as "plugin not found" at runtime. Failing to flip the bit on a
-# single file is recoverable (Qt will surface the dlopen failure at load time),
-# so the chmod errors are intentionally tolerated.
+# surfaces as "plugin not found" at runtime. chmod succeeds on the regular
+# files we care about; if it ever fails, abort — a missing +x bit on a
+# framework binary means the app won't launch, so we want to know now.
 find "$bundle/Contents/Frameworks" -type f -name 'Qt*' -exec chmod +x {} +
 find "$bundle/Contents/PlugIns" -type f \( -name '*.dylib' -o -name 'libq*' \) -exec chmod +x {} +
 find "$bundle/Contents/Resources" -type f -name '*.dylib' -exec chmod +x {} +
@@ -386,4 +386,100 @@ if (( ${#stale_refs[@]} > 0 )); then
         otool -L "$bin" | grep '/opt/homebrew' >&2 || true
     done
     exit 1
+fi
+
+# 6. Verify that the QML modules Spun actually imports are present in the
+#    bundle. macdeployqt crashes on Spun's qml/ tree and we work around it,
+#    so without this check a silent failure of the workaround would manifest
+#    only at runtime as "module QtQuick.Dialogs is not installed".
+for module in QtQuick QtQuick/Controls QtQuick/Dialogs QtQuick/Layouts QtQuick/Window; do
+    if [[ ! -f "$bundle/Contents/Resources/qml/$module/qmldir" ]]; then
+        echo "ERROR: required QML module $module is missing from the bundle." >&2
+        echo "       (expected $bundle/Contents/Resources/qml/$module/qmldir)" >&2
+        echo "       This usually means qml_root (\"$qml_root\") did not contain" >&2
+        echo "       Qt 6 modules, or the cp/rsync copy failed." >&2
+        exit 1
+    fi
+done
+# Quick3D is only required when SPUN_ENABLE_3D was set at build time. We
+# detect it by the presence of the QtQuick3D private plugin dylib in the
+# bundle; if it's there, the qmldir should be too.
+if [[ -f "$bundle/Contents/PlugIns/quick/libqtquick3dquickplugin.dylib" \
+   || -f "$bundle/Contents/Resources/qml/QtQuick3D/qmldir" ]]; then
+    if [[ ! -f "$bundle/Contents/Resources/qml/QtQuick3D/qmldir" ]]; then
+        echo "ERROR: QtQuick3D plugin is present but its qmldir is missing." >&2
+        exit 1
+    fi
+fi
+
+# 7. Resolve every non-system LC_LOAD_DYLIB inside the bundle to an existing
+#    file. A dangling @executable_path/... or @rpath/... reference would
+#    only surface at runtime as "image not found", and macOS dialogs do not
+#    tell the developer which Mach-O owned the broken reference. Walk each
+#    binary once, resolve each install name against the bundle root, and
+#    fail with the full list if any reference is missing.
+unresolved=()
+while read -r bin; do
+    [[ -f "$bin" ]] || continue
+    # @executable_path is defined as the directory of the main executable
+    # (Contents/MacOS/), regardless of which Mach-O carries the load
+    # command; @loader_path is the directory of the binary that owns the
+    # command.
+    exec_root="$bundle/Contents/MacOS"
+    loader_root="$(dirname "$bin")"
+    while read -r dep; do
+        case "$dep" in
+            /usr/lib/*|/System/Library/*) continue ;;
+        esac
+        resolved=""
+        case "$dep" in
+            @executable_path/*)
+                tail="${dep#@executable_path/}"
+                resolved="$exec_root/$tail"
+                ;;
+            @loader_path/*)
+                tail="${dep#@loader_path/}"
+                resolved="$loader_root/$tail"
+                ;;
+        esac
+        # @rpath is resolved via LC_RPATH, which we already vetted in step 5
+        # (delete_rpath kept only @executable_path/../Frameworks, so @rpath
+        # lookups land in the bundle's Frameworks/). We do not re-check them
+        # here because the resolution depends on the rpath table, not the
+        # install name alone.
+        if [[ -n "$resolved" && ! -e "$resolved" ]]; then
+            unresolved+=("$bin -> $dep")
+        fi
+    done < <(otool -L "$bin" 2>/dev/null | awk '/^\t/ && $1 !~ /^\/usr\/lib/ && $1 !~ /^\/System\/Library/ {print $1}')
+done < <(find "$bundle/Contents" -type f -perm +111 2>/dev/null)
+if (( ${#unresolved[@]} > 0 )); then
+    echo "ERROR: bundle has unresolved install names after signing:" >&2
+    for ref in "${unresolved[@]}"; do
+        echo "  $ref" >&2
+    done
+    exit 1
+fi
+
+# 6. Verify that the QML modules Spun actually imports are present in the
+#    bundle. macdeployqt crashes on Spun's qml/ tree and we work around it,
+#    so without this check a silent failure of the workaround would manifest
+#    only at runtime as "module QtQuick.Dialogs is not installed".
+for module in QtQuick QtQuick/Controls QtQuick/Dialogs QtQuick/Layouts QtQuick/Window; do
+    if [[ ! -f "$bundle/Contents/Resources/qml/$module/qmldir" ]]; then
+        echo "ERROR: required QML module $module is missing from the bundle." >&2
+        echo "       (expected $bundle/Contents/Resources/qml/$module/qmldir)" >&2
+        echo "       This usually means qml_root (\"$qml_root\") did not contain" >&2
+        echo "       Qt 6 modules, or the cp/rsync copy failed." >&2
+        exit 1
+    fi
+done
+# Quick3D is only required when SPUN_ENABLE_3D was set at build time. We
+# detect it by the presence of the QtQuick3D private plugin dylib in the
+# bundle; if it's there, the qmldir should be too.
+if [[ -f "$bundle/Contents/PlugIns/quick/libqtquick3dquickplugin.dylib" \
+   || -f "$bundle/Contents/Resources/qml/QtQuick3D/qmldir" ]]; then
+    if [[ ! -f "$bundle/Contents/Resources/qml/QtQuick3D/qmldir" ]]; then
+        echo "ERROR: QtQuick3D plugin is present but its qmldir is missing." >&2
+        exit 1
+    fi
 fi
