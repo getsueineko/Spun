@@ -707,7 +707,12 @@ ApplicationWindow {
         }
         onLoaded: if (filesLoader.item) filesLoader.item.open()
     }
-    function openMusicDialog() { filesLoader.active = true }
+    function openMusicDialog() {
+        if (filesLoader.item)
+            filesLoader.item.open()
+        else
+            filesLoader.active = true
+    }
 
     Loader {
         id: coverLoader
@@ -720,7 +725,12 @@ ApplicationWindow {
         }
         onLoaded: if (coverLoader.item) coverLoader.item.open()
     }
-    function openCoverDialog() { coverLoader.active = true }
+    function openCoverDialog() {
+        if (coverLoader.item)
+            coverLoader.item.open()
+        else
+            coverLoader.active = true
+    }
 
     // FolderDialog has the same Qt 6.11 QFileDialogOptions quirk as FileDialog.
     Loader {
@@ -733,7 +743,12 @@ ApplicationWindow {
         }
         onLoaded: if (folderLoader.item) folderLoader.item.open()
     }
-    function openFolderDialog() { folderLoader.active = true }
+    function openFolderDialog() {
+        if (folderLoader.item)
+            folderLoader.item.open()
+        else
+            folderLoader.active = true
+    }
 
     function advanceMediaFrame(seconds, now) {
         const dt = Math.min(.05, seconds)

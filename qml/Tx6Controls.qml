@@ -15,7 +15,7 @@ Item {
     property real contactX: 0
     property bool shiftHeld: false
     property int loadChannel: 1
-    readonly property bool popupOpen: channelMenu.visible || stemFile.visible
+    readonly property bool popupOpen: channelMenu.visible || (stemFileLoader.item && stemFileLoader.item.visible)
     readonly property var keyItems: {
         let a = [];
         for (let i = 0; i < keys.count; i++) a.push(keys.itemAt(i))
@@ -604,7 +604,7 @@ Item {
         MenuItem {
             text: "Load local audio…"
             enabled: mixer.loadChannel > 0
-            onTriggered: stemFile.open()
+            onTriggered: loadStemFile()
         }
 
         MenuItem {
@@ -648,7 +648,10 @@ Item {
         onLoaded: if (stemFileLoader.item) stemFileLoader.item.open()
     }
     function loadStemFile() {
-        stemFileLoader.active = true
+        if (stemFileLoader.item)
+            stemFileLoader.item.open()
+        else
+            stemFileLoader.active = true
     }
 
 }
