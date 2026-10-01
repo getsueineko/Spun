@@ -168,16 +168,16 @@ To launch the resulting bundle directly (bypassing LaunchServices):
 ./build/Spun.app/Contents/MacOS/Spun
 ```
 
-**Why `Class X is implemented in both` warnings appear during development.** macOS scans `/opt/homebrew/lib` (and the rest of the implicit framework search path) in addition to the bundle's own Frameworks directory. When Homebrew's `qt` formula is installed, the runtime loads both the bundled QtCore and the Homebrew QtCore, and the Objective-C runtime prints one `objc[Spun]: Class QT_PREPEND_NAMESPACE(QCocoaApplicationDelegate) is implemented in both ...` line per colliding class. The bundled Qt is the one wired into the app via `@rpath`; the Homebrew copy is loaded for class lookups only.
+**Why `Class X is implemented in both` warnings appear during development.** Qt installed via Homebrew ships its frameworks under `/opt/homebrew/Cellar/qtbase/6.11.2/lib`. Homebrew adds that directory to `/opt/homebrew/lib` (the `/opt/homebrew/opt/qtbase` symlink), and `macdeployqt` copies the binary with its original `LC_LOAD_DYLIB` load commands intact — i.e. still pointing at `/opt/homebrew/opt/qtbase/lib/QtCore.framework/...`. dyld resolves those names by walking the `@rpath` search list *and* the dyld fallback path that the linker picked up at build time, finds the same framework twice (once inside the bundle, once in Homebrew), and prints `objc[Spun]: Class QT_ROOT_LEVEL_POOL__THESE_OBJECTS_WILL_BE_RELEASED_WHEN_QAPP_GOES_OUT_OF_SCOPE is implemented in both ...` for every colliding Objective-C class.
 
-`scripts/sign-macos-bundle.sh` rewrites every `/opt/homebrew/...` reference in the bundle to `@rpath/...`, then scans every executable for stray references and aborts with a list of offenders if any are found. You can verify your bundle is clean with:
+`scripts/sign-macos-bundle.sh` rewrites every `/opt/homebrew/...` reference in the bundle (both LC_LOAD_DYLIB on the dependents and LC_ID_DYLIB on the copied frameworks) to `@executable_path/../Frameworks/...`, then scans every executable and aborts with a list of offenders if any survive. You can verify your bundle is clean with:
 
 ```sh
 find build/Spun.app/Contents -type f -perm +111 -exec otool -L {} \; \
     | grep '/opt/homebrew' || echo "Bundle is clean."
 ```
 
-If that prints nothing, your local Qt was fully rewritten and the warnings you see come from `/opt/homebrew/lib` still being on macOS's implicit search path, not from anything inside the bundle. They do not affect a user who installs Spun via the published `.app` (no Homebrew Qt on their machine).
+If that prints nothing the bundle itself is fine. The user-visible .app shipped through this build never sees Homebrew because no `LC_LOAD_DYLIB` inside it names it; the warning only appears when the developer's own machine has `brew install qt` and dyld still resolves the original Homebrew copy.
 
 </details>
 
