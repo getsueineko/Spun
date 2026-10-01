@@ -636,6 +636,7 @@ ApplicationWindow {
         function onAddFolderTriggered() { root.openFolderDialog() }
         function onToggleSidebar() { root.libraryOpen = !root.libraryOpen }
         function onToggleQueue() { root.queueOpen = !root.queueOpen }
+        function onMinimizeTriggered() { root.showMinimized() }
         function onToggleMini() { player.miniMode = !player.miniMode }
         function onPlayPause() { root.togglePlayback() }
         function onPreviousTrack() { root.deckPlayer.previous() }
@@ -676,6 +677,10 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+B"; enabled: (root.useCider || root.useYoutube || root.useServer) && !root.menuOpen; onActivated: { root.revealChrome(); root.openLibrary() } }
     Shortcut { sequence: "Ctrl+L"; enabled: !root.menuOpen; onActivated: { root.revealChrome(); root.toggleQueue() } }
     Shortcut { sequence: "Ctrl+I"; enabled: !root.menuOpen; onActivated: { root.revealChrome(); root.toggleImmersion() } }
+    // On macOS a real Cmd+M is consumed by the native Window > Minimize item
+    // before Qt sees it, so this shortcut only fires for synthetic key events
+    // (the offscreen self-tests) there. Do not gate it on the platform: the
+    // tests send Ctrl+M straight to the window.
     Shortcut { sequence: "Ctrl+M"; enabled: !root.menuOpen; onActivated: { root.revealChrome(); player.miniMode = !player.miniMode } }
     Shortcut { sequence: "Right"; enabled: !(root.activeFocusItem instanceof Slider) && !root.editingText && !root.menuOpen; onActivated: { root.revealChrome(); root.deckPlayer.seek(root.deckPlayer.position + 5000) } }
     Shortcut { sequence: "Left"; enabled: !(root.activeFocusItem instanceof Slider) && !root.editingText && !root.menuOpen; onActivated: { root.revealChrome(); root.deckPlayer.seek(root.deckPlayer.position - 5000) } }
@@ -1566,7 +1571,7 @@ ApplicationWindow {
             IconButton { id: miniNext; objectName: "miniNext"; Accessible.description: miniPeek.visible ? miniPeek.summary : ""; showTip: false; glyphName: "next"; tip: "Next track"; ink: root.ink; hoverFill: root.hoverFill; enabled: root.useCider ? root.ciderService.canNext : root.deckPlayer.count > 0; onClicked: root.deckPlayer.next()
                 NextTrackTip { id: miniPeek; app: root; visible: root.miniMode && miniNext.enabled && (miniNext.hovered || miniNext.visualFocus) && !miniNext.down && !quickJump.visible }
             }
-            IconButton { id: miniRestore; objectName: "miniRestore"; glyphName: "external"; tip: "Full player · Ctrl+M"; ink: root.mutedInk; hoverFill: root.hoverFill; onClicked: player.miniMode = false }
+            IconButton { id: miniRestore; objectName: "miniRestore"; glyphName: "external"; tip: "Full player · " + (Qt.platform.os === "osx" ? "\u2318\u2325M" : "Ctrl+M"); ink: root.mutedInk; hoverFill: root.hoverFill; onClicked: player.miniMode = false }
         }
     }
 

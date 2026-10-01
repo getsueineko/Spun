@@ -29,6 +29,7 @@
 - (void)emitNext:(id)sender;
 - (void)emitToggleShuffle:(id)sender;
 - (void)emitCycleRepeat:(id)sender;
+- (void)emitMinimize:(id)sender;
 - (void)emitToggleMini:(id)sender;
 - (void)emitBringAllToFront:(id)sender;
 - (void)emitHelp:(id)sender;
@@ -55,6 +56,7 @@
 - (void)emitNext:(id)sender { if (_owner) emit _owner->nextTrack(); }
 - (void)emitToggleShuffle:(id)sender { if (_owner) emit _owner->toggleShuffle(); }
 - (void)emitCycleRepeat:(id)sender { if (_owner) emit _owner->cycleRepeat(); }
+- (void)emitMinimize:(id)sender { if (_owner) emit _owner->minimizeTriggered(); }
 - (void)emitToggleMini:(id)sender { if (_owner) emit _owner->toggleMini(); }
 - (void)emitBringAllToFront:(id)sender { [NSApp arrangeInFront:nil]; }
 - (void)emitHelp:(id)sender { if (_owner) emit _owner->helpTriggered(); }
@@ -175,8 +177,13 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
     NSMenuItem *windowItem = [[NSMenuItem alloc] init];
     [windowItem setSubmenu:windowMenu];
     [mainMenu addItem:windowItem];
-    // Cmd+M is reserved by macOS for Minimize Window. Use Cmd+Opt+M for
-    // Spun's Mini Mode so users can still minimize the window normally.
+    // Cmd+M is reserved by macOS for Minimize Window, so the standard item is
+    // present here and Spun's own Mini Mode lives on Cmd+Opt+M. Minimize is
+    // routed through QML (root.showMinimized(), the same call as the title-bar
+    // button) because the window is custom-shaped and may not carry the
+    // miniaturizable style bit that -performMiniaturize: requires.
+    addSignalItem(windowMenu, @"Minimize", @selector(emitMinimize:), @"m",
+                  NSEventModifierFlagCommand);
     addSignalItem(windowMenu, @"Mini Mode", @selector(emitToggleMini:), @"m",
                   NSEventModifierFlagCommand | NSEventModifierFlagOption);
     [windowMenu addItem:[NSMenuItem separatorItem]];

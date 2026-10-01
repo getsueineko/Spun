@@ -44,6 +44,7 @@ signals:
     void toggleSidebar();
     void toggleQueue();
     // Window
+    void minimizeTriggered();
     void toggleMini();
     // View > Player Type
     void setMedium(const QString &medium);
