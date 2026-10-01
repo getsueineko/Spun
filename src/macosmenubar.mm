@@ -106,38 +106,38 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
     [appMenuItem setSubmenu:appMenu];
     [mainMenu addItem:appMenuItem];
     NSString *appName = [[NSProcessInfo processInfo] processName];
-    addSignalItem(appMenu, @"About Spun", @selector(emitAbout:), @"", NSCommandKeyMask);
-    addSignalItem(appMenu, @"Settings\u2026", @selector(emitSettings:), @",", NSCommandKeyMask);
+    addSignalItem(appMenu, @"About Spun", @selector(emitAbout:), @"", NSEventModifierFlagCommand);
+    addSignalItem(appMenu, @"Settings\u2026", @selector(emitSettings:), @",", NSEventModifierFlagCommand);
     [appMenu addItem:[NSMenuItem separatorItem]];
     addSignalItem(appMenu,
                   [NSString stringWithFormat:@"Hide %@", appName],
-                  @selector(emitHideApp:), @"h", NSCommandKeyMask);
-    addSignalItem(appMenu, @"Hide Others", @selector(emitHideOthers:), @"h", NSCommandKeyMask);
+                  @selector(emitHideApp:), @"h", NSEventModifierFlagCommand);
+    addSignalItem(appMenu, @"Hide Others", @selector(emitHideOthers:), @"h", NSEventModifierFlagCommand);
     addSignalItem(appMenu, @"Show All", @selector(emitShowAll:), @"",
-                  NSCommandKeyMask | NSAlternateKeyMask);
+                  NSEventModifierFlagCommand | NSEventModifierFlagOption);
     [appMenu addItem:[NSMenuItem separatorItem]];
     addSignalItem(appMenu,
                   [NSString stringWithFormat:@"Quit %@", appName],
-                  @selector(emitQuit:), @"q", NSCommandKeyMask);
+                  @selector(emitQuit:), @"q", NSEventModifierFlagCommand);
 
     NSMenu *fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
     NSMenuItem *fileItem = [[NSMenuItem alloc] init];
     [fileItem setSubmenu:fileMenu];
     [mainMenu addItem:fileItem];
-    addSignalItem(fileMenu, @"Add Music\u2026", @selector(emitAddMusic:), @"o", NSCommandKeyMask);
+    addSignalItem(fileMenu, @"Add Music\u2026", @selector(emitAddMusic:), @"o", NSEventModifierFlagCommand);
     addSignalItem(fileMenu, @"Add Folder\u2026", @selector(emitAddFolder:),
-                  @"o", NSCommandKeyMask | NSShiftKeyMask);
+                  @"o", NSEventModifierFlagCommand | NSEventModifierFlagShift);
     [fileMenu addItem:[NSMenuItem separatorItem]];
-    addSignalItem(fileMenu, @"Close Window", @selector(emitCloseWindow:), @"w", NSCommandKeyMask);
+    addSignalItem(fileMenu, @"Close Window", @selector(emitCloseWindow:), @"w", NSEventModifierFlagCommand);
 
     NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
     NSMenuItem *viewItem = [[NSMenuItem alloc] init];
     [viewItem setSubmenu:viewMenu];
     [mainMenu addItem:viewItem];
     d->sidebarItem = addSignalItem(viewMenu, @"Show Sidebar",
-                                   @selector(emitToggleSidebar:), @"\\", NSCommandKeyMask);
+                                   @selector(emitToggleSidebar:), @"\\", NSEventModifierFlagCommand);
     d->queueItem = addSignalItem(viewMenu, @"Show Queue",
-                                 @selector(emitToggleQueue:), @"l", NSCommandKeyMask);
+                                 @selector(emitToggleQueue:), @"l", NSEventModifierFlagCommand);
     [viewMenu addItem:[NSMenuItem separatorItem]];
     NSMenu *playerMenu = [[NSMenu alloc] initWithTitle:@"Player Type"];
     NSMenuItem *playerItem = [[NSMenuItem alloc] initWithTitle:@"Player Type"
@@ -145,42 +145,42 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
                                                    keyEquivalent:@""];
     [playerItem setSubmenu:playerMenu];
     [viewMenu addItem:playerItem];
-    d->cdItem      = addSignalItem(playerMenu, @"CD",      @selector(emitMediumCD:),      @"1", NSCommandKeyMask);
-    d->vinylItem   = addSignalItem(playerMenu, @"Vinyl",   @selector(emitMediumVinyl:),   @"2", NSCommandKeyMask);
-    d->cassetteItem= addSignalItem(playerMenu, @"Cassette",@selector(emitMediumCassette:),@"3", NSCommandKeyMask);
-    d->tp7Item     = addSignalItem(playerMenu, @"TP-7",    @selector(emitMediumTP7:),     @"4", NSCommandKeyMask);
+    d->cdItem      = addSignalItem(playerMenu, @"CD",      @selector(emitMediumCD:),      @"1", NSEventModifierFlagCommand);
+    d->vinylItem   = addSignalItem(playerMenu, @"Vinyl",   @selector(emitMediumVinyl:),   @"2", NSEventModifierFlagCommand);
+    d->cassetteItem= addSignalItem(playerMenu, @"Cassette",@selector(emitMediumCassette:),@"3", NSEventModifierFlagCommand);
+    d->tp7Item     = addSignalItem(playerMenu, @"TP-7",    @selector(emitMediumTP7:),     @"4", NSEventModifierFlagCommand);
 
     NSMenu *playMenu = [[NSMenu alloc] initWithTitle:@"Playback"];
     NSMenuItem *playItem = [[NSMenuItem alloc] init];
     [playItem setSubmenu:playMenu];
     [mainMenu addItem:playItem];
     d->playPauseItem = addSignalItem(playMenu, @"Play",
-                                     @selector(emitPlayPause:), @" ", NSCommandKeyMask);
+                                     @selector(emitPlayPause:), @" ", NSEventModifierFlagCommand);
     addSignalItem(playMenu, @"Previous Track", @selector(emitPrevious:),
                   @"", 0);
     addSignalItem(playMenu, @"Next Track", @selector(emitNext:), @"", 0);
     [playMenu addItem:[NSMenuItem separatorItem]];
     d->shuffleItem = addSignalItem(playMenu, @"Shuffle",
                                    @selector(emitToggleShuffle:),
-                                   @"s", NSCommandKeyMask | NSShiftKeyMask);
+                                   @"s", NSEventModifierFlagCommand | NSEventModifierFlagShift);
     d->repeatItem = addSignalItem(playMenu, @"Repeat",
                                   @selector(emitCycleRepeat:),
-                                  @"r", NSCommandKeyMask | NSShiftKeyMask);
+                                  @"r", NSEventModifierFlagCommand | NSEventModifierFlagShift);
 
     NSMenu *windowMenu = [[NSMenu alloc] initWithTitle:@"Window"];
     NSMenuItem *windowItem = [[NSMenuItem alloc] init];
     [windowItem setSubmenu:windowMenu];
     [mainMenu addItem:windowItem];
-    addSignalItem(windowMenu, @"Mini Mode", @selector(emitToggleMini:), @"m", NSCommandKeyMask);
+    addSignalItem(windowMenu, @"Mini Mode", @selector(emitToggleMini:), @"m", NSEventModifierFlagCommand);
     [windowMenu addItem:[NSMenuItem separatorItem]];
     addSignalItem(windowMenu, @"Bring All to Front",
-                  @selector(emitBringAllToFront:), @"", NSCommandKeyMask);
+                  @selector(emitBringAllToFront:), @"", NSEventModifierFlagCommand);
 
     NSMenu *helpMenu = [[NSMenu alloc] initWithTitle:@"Help"];
     NSMenuItem *helpItem = [[NSMenuItem alloc] init];
     [helpItem setSubmenu:helpMenu];
     [mainMenu addItem:helpItem];
-    addSignalItem(helpMenu, @"Spun Help", @selector(emitHelp:), @"", NSCommandKeyMask);
+    addSignalItem(helpMenu, @"Spun Help", @selector(emitHelp:), @"", NSEventModifierFlagCommand);
 
     [NSApp setMainMenu:mainMenu];
     [NSApp setWindowsMenu:windowMenu];

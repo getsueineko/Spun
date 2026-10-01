@@ -53,6 +53,12 @@ if(APPLE)
     target_sources(spun_core PRIVATE src/macosaccent.mm src/macosaccent.h
                                      src/macosmenubar.mm src/macosmenubar.h)
     target_link_libraries(spun_core PRIVATE "-framework Cocoa" "-framework AppKit")
+    # Compile the Objective-C++ sources with ARC so Cocoa allocations stay in
+    # step with the Obj-C reference counts and we do not have to balance every
+    # alloc/release pair manually. The .mm files use `assign` on a raw C++
+    # pointer for the MacosMenuBar back-reference, which ARC treats like MRC.
+    set_source_files_properties(src/macosaccent.mm src/macosmenubar.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
 target_link_libraries(spun_core PUBLIC Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
     Qt6::Svg Qt6::Multimedia Qt6::Concurrent Qt6::DBus Qt6::Network PkgConfig::TAGLIB)

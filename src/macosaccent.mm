@@ -41,8 +41,11 @@ MacosAccent::MacosAccent(QObject *parent)
     // NSDistributedNotificationCenter does not deliver to sandboxed apps
     // targeting the App Store, but for an ad-hoc-signed desktop build the
     // notification arrives and lets us react to accent changes in System
-    // Settings while Spun is running.
-    __weak MacosAccent *weakSelf = this;
+    // Settings while Spun is running. MacosAccent is a QObject (C++) so the
+    // observer block holds a raw pointer; the destructor always calls
+    // removeObserver: on the same thread before deleting the object, so the
+    // block cannot outlive `this` in practice.
+    MacosAccent *weakSelf = this;
     d->observerToken =
         [[NSDistributedNotificationCenter defaultCenter]
             addObserverForName:@"AppleColorPreferencesChangedNotification"
@@ -50,7 +53,7 @@ MacosAccent::MacosAccent(QObject *parent)
                          queue:[NSOperationQueue mainQueue]
                     usingBlock:^(NSNotification *note) {
                         (void)note;
-                        if (MacosAccent *strong = weakSelf) strong->refresh();
+                        weakSelf->refresh();
                     }];
     // Some macOS configurations do not deliver
     // AppleColorPreferencesChangedNotification (notably when the user
@@ -75,7 +78,6 @@ MacosAccent::~MacosAccent() {
     }
     if (d->poller) {
         d->poller->stop();
-        d->poller->deleteLater();
         d->poller = nullptr;
     }
 #endif
