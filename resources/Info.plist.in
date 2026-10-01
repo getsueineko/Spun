@@ -10,11 +10,11 @@
     <key>CFBundleExecutable</key>
     <string>Spun</string>
     <key>CFBundleIdentifier</key>
-    <string>com.yappologistic.spun</string>
+    <string>@SPUN_BUNDLE_ID@</string>
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>@PROJECT_VERSION@</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>@PROJECT_VERSION@</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
@@ -48,7 +48,5 @@
             </array>
         </dict>
     </array>
-    <key>NSSupportsAutomaticGraphicsSwitching</key>
-    <true/>
 </dict>
 </plist>

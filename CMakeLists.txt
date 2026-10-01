@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 project(Spun VERSION 0.1.0 LANGUAGES CXX)
+# Bundle identifier is upstream's com.yappologistic.spun; keep it as a single
+# CMake variable so Info.plist, MACOSX_BUNDLE_GUI_IDENTIFIER and the
+# single-instance server all see the same string.
+set(SPUN_BUNDLE_ID "com.yappologistic.spun" CACHE STRING "Reverse-DNS bundle identifier used for the macOS app")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -115,13 +119,19 @@ function(spun_application target)
 endfunction()
 spun_application(spun)
 if(APPLE)
+    # Substitute version + bundle id into Info.plist.in so the custom plist
+    # matches the MACOSX_BUNDLE_* target properties without two sources of
+    # truth that could drift apart on a release bump.
+    set(_info_plist_src "${CMAKE_SOURCE_DIR}/resources/Info.plist.in")
+    set(_info_plist_dst "${CMAKE_CURRENT_BINARY_DIR}/Spun.app.Info.plist")
+    configure_file("${_info_plist_src}" "${_info_plist_dst}" @ONLY)
     set_target_properties(spun PROPERTIES
         MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/resources/Info.plist.in"
+        MACOSX_BUNDLE_INFO_PLIST "${_info_plist_dst}"
         MACOSX_BUNDLE_BUNDLE_NAME "Spun"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.yappologistic.spun"
-        MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${SPUN_BUNDLE_ID}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         MACOSX_BUNDLE_COPYRIGHT "Copyright (c) 2026 Spun contributors"
         OUTPUT_NAME "Spun"
     )
@@ -181,7 +191,7 @@ if(APPLE)
             add_custom_command(TARGET spun POST_BUILD
                 COMMAND "${CMAKE_SOURCE_DIR}/scripts/sign-macos-bundle.sh"
                     "${_bundle}"
-                    "com.yappologistic.spun"
+                    "${SPUN_BUNDLE_ID}"
                     "${_entitlements}"
                     "${_qml_root}"
                 COMMENT "Deploying QML plugins, rewriting rpaths and ad-hoc signing Spun.app"
