@@ -161,7 +161,8 @@ if [[ -n "$qml_root" && -d "$qml_root" ]]; then
     for entry in \
         "QtQuickControls2Impl:${qtdecl_prefix:-}" \
         "QtQuickDialogs2Impl:${qtdecl_prefix:-}" \
-        "QtLabsAnimation:${qtdecl_prefix:-}"; do
+        "QtLabsAnimation:${qtdecl_prefix:-}" \
+        "QtQuickLayouts:${qtdecl_prefix:-}"; do
         fw="${entry%%:*}"
         prefix="${entry##*:}"
         [[ -z "$prefix" || -z "$fw" ]] && continue
@@ -179,6 +180,7 @@ if [[ -n "$qml_root" && -d "$qml_root" ]]; then
     if [[ -n "$qtdecl_prefix" && -d "$qtdecl_prefix/lib" ]]; then
         for fw_dir in "$qtdecl_prefix/lib"/QtQuickControls2*.framework \
                       "$qtdecl_prefix/lib"/QtQuickDialogs2*.framework \
+                      "$qtdecl_prefix/lib"/QtQuickLayouts.framework \
                       "$qtdecl_prefix/lib"/QtQuickTemplates2.framework; do
             [[ -d "$fw_dir" ]] || continue
             fw_name="$(basename "$fw_dir")"
@@ -191,6 +193,17 @@ if [[ -n "$qml_root" && -d "$qml_root" ]]; then
             fi
         done
     fi
+    # macdeployqt and our private-framework copy both drop binaries into
+    # Frameworks/ without the executable bit, and Qt refuses to dlopen a
+    # non-executable framework. Set +x on every framework binary and every
+    # *.dylib; skip Headers/, Resources/, *.prl, *.h siblings that codesign
+    # needs to overwrite during re-sign.
+    find "$bundle/Contents/Frameworks" "$bundle/Contents/PlugIns" \
+        -mindepth 4 -maxdepth 5 -path '*/Versions/A/*' -type f ! -name '*.*' \
+        -exec chmod +x {} +
+    find "$bundle/Contents/Frameworks" "$bundle/Contents/PlugIns" \
+        -type f -name '*.dylib' \
+        -exec chmod +x {} +
 fi
 
 # 2. Strip absolute Homebrew rpath from the main executable. A missing rpath
@@ -213,31 +226,44 @@ process_bin() {
         while read -r rp; do
             [[ -z "$rp" ]] && continue
             "$install_name_tool" -delete_rpath "$rp" "$bin"
-        done < <(otool -l "$bin" 2>/dev/null | awk '/LC_RPATH/{getline; getline; sub(/^path /,""); print}' | grep '^/opt/' || true)
+        done < <(otool -l "$bin" 2>/dev/null | awk '/LC_RPATH/{getline; getline; sub(/^[[:space:]]*path /,""); sub(/[[:space:]].*$/, ""); print}' | grep '^/opt/' || true)
     fi
-    if otool -l "$bin" 2>/dev/null | grep -q '@loader_path/../../../'; then
+    if otool -l "$bin" 2>/dev/null | grep -q '@loader_path/'; then
         while read -r rp; do
             [[ -z "$rp" ]] && continue
             "$install_name_tool" -delete_rpath "$rp" "$bin" || true
-        done < <(otool -l "$bin" 2>/dev/null | awk '/LC_RPATH/{getline; getline; sub(/^path /,""); print}' | grep '@loader_path' || true)
+        done < <(otool -l "$bin" 2>/dev/null | awk '/LC_RPATH/{getline; getline; sub(/^[[:space:]]*path /,""); sub(/[[:space:]].*$/, ""); print}' | grep '@loader_path' || true)
     fi
     if otool -L "$bin" 2>/dev/null | grep -q '@rpath/'; then
-        "$install_name_tool" -add_rpath '@executable_path/../Frameworks' "$bin" || true
+        if ! otool -l "$bin" 2>/dev/null | grep -q "path @executable_path/../Frameworks"; then
+            "$install_name_tool" -add_rpath '@executable_path/../Frameworks' "$bin" || true
+        fi
     fi
     # Rewrite absolute /opt/homebrew LC_LOAD_DYLIB references to the bundle.
-    # The mapping is "QtFoo.framework" -> "QtFoo" framework binary inside
-    # Contents/Frameworks, so we keep just the framework name and rebase the
-    # path to @rpath/<framework>/Versions/A/<framework>. dyld resolves
-    # @rpath/ via the LC_RPATH table (we add @executable_path/../Frameworks
-    # above) so the dependents land on the in-bundle copy rather than the
-    # Homebrew installation that produced the original reference.
+    # The mapping is "Foo.framework/Versions/A/Foo" or "libbar.dylib" ->
+    # @executable_path/../Frameworks/<basename>. Using the absolute
+    # @executable_path form (not @rpath) means the rewrite works for plugin
+    # dylibs that do not carry the @executable_path/../Frameworks LC_RPATH
+    # entry — QML plugins copied into Resources/qml/<Module>/ in particular
+    # only have a Homebrew-style @loader_path/../../../../../lib rpath, so
+    # @rpath would fail to resolve.
     while IFS= read -r dep; do
         [[ -z "$dep" ]] && continue
-        # dep looks like /opt/homebrew/opt/qtbase/lib/Foo.framework/Versions/A/Foo
-        local fw_name
-        fw_name="$(basename "$(dirname "$(dirname "$(dirname "$dep")")")")"
-        if [[ "$fw_name" == *.framework ]]; then
-            local new_name="@rpath/${fw_name}/Versions/A/${fw_name%.framework}"
+        local new_name=""
+        if [[ "$dep" == *.framework/Versions/A/* ]]; then
+            local fw_name
+            fw_name="$(basename "$(dirname "$(dirname "$(dirname "$dep")")")")"
+            new_name="@executable_path/../Frameworks/${fw_name}/Versions/A/${fw_name%.framework}"
+        elif [[ "$dep" == *.dylib ]]; then
+            # Strip any path prefix and version suffix. We rely on the file
+            # being present in Contents/Frameworks/ with the same basename;
+            # macdeployqt copies each .dylib flat there. Suffixes like -1.2.3
+            # and versionless plain .dylib are both handled.
+            local lib_name
+            lib_name="$(basename "$dep")"
+            new_name="@executable_path/../Frameworks/${lib_name}"
+        fi
+        if [[ -n "$new_name" ]]; then
             "$install_name_tool" -change "$dep" "$new_name" "$bin"
         fi
     done < <(otool -L "$bin" 2>/dev/null | awk '/^\t\/opt\/homebrew/{print $1}' || true)
@@ -245,14 +271,24 @@ process_bin() {
     # matches what dependents look for via @rpath. Without this the entry
     # stays at /opt/homebrew/... and dyld's record of the framework does
     # not match the path used by other modules when resolving @rpath.
+    # Plain *.dylib files get the same treatment so otool -L does not show
+    # the absolute /opt/homebrew install name (dyld would also reach back
+    # to the brew path on lookup, which is exactly the bug we are fixing).
     local id_name
     id_name="$(otool -D "$bin" 2>/dev/null | sed -n '2p')"
     if [[ "$id_name" == /opt/homebrew/* ]]; then
-        local id_fw
-        id_fw="$(basename "$(dirname "$(dirname "$(dirname "$id_name")")")")"
-        if [[ "$id_fw" == *.framework ]]; then
-            "$install_name_tool" -id \
-                "@rpath/${id_fw}/Versions/A/${id_fw%.framework}" "$bin"
+        local new_id=""
+        if [[ "$id_name" == *.framework/Versions/A/* ]]; then
+            local id_fw
+            id_fw="$(basename "$(dirname "$(dirname "$(dirname "$id_name")")")")"
+            new_id="@rpath/${id_fw}/Versions/A/${id_fw%.framework}"
+        elif [[ "$id_name" == *.dylib ]]; then
+            local id_lib
+            id_lib="$(basename "$id_name")"
+            new_id="@executable_path/../Frameworks/${id_lib}"
+        fi
+        if [[ -n "$new_id" ]]; then
+            "$install_name_tool" -id "$new_id" "$bin"
         fi
     fi
 }
@@ -288,6 +324,9 @@ while read -r bin; do process_bin "$bin"; done < <(find "$bundle/Contents/Framew
 #    does not require a parallel edit.
 sign_bin() {
     local bin="$1"
+    # Re-signing needs write permission on the file; if a previous run put
+    # the framework into a read-only state we have to drop that here.
+    [[ -w "$bin" ]] || chmod u+w "$bin"
     "$codesign" --force --sign - --identifier "$id" "$bin"
 }
 while read -r bin; do
