@@ -80,6 +80,8 @@
 #include <QDBusInterface>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -1603,6 +1605,71 @@ static int exercise(Player &player, Theme &theme, Lyrics &lyrics, QQuickWindow *
 
 #endif
 
+// macOS has no D-Bus session bus, so MPRIS-based single-instance detection does
+// not work there. We use a QLocalServer/QLocalSocket pair named after the
+// reverse-DNS bundle identifier; the first instance listens, subsequent ones
+// connect, forward their positional arguments as URLs, and exit. The server is
+// created after parsing so positional arguments are available, but it stores a
+// QPointer to Player and only forwards when Player is still alive.
+#ifdef Q_OS_MACOS
+class MacosSingleInstance : public QObject {
+    Q_OBJECT
+public:
+    explicit MacosSingleInstance(const QString &socketName, QObject *parent = nullptr)
+        : QObject(parent), m_server(new QLocalServer(this)), m_socketName(socketName) {
+        m_server->setSocketOptions(QLocalServer::UserAccessOption);
+    }
+    // Try to forward the given file URLs to an already-running instance.
+    // Returns true if a peer accepted the connection (caller should exit 0).
+    bool forward(const QStringList &urls) {
+        QLocalSocket socket;
+        socket.connectToServer(m_socketName);
+        if (!socket.waitForConnected(200))
+            return false;
+        QByteArray payload;
+        QDataStream stream(&payload, QIODevice::WriteOnly);
+        stream.setVersion(QDataStream::Qt_6_0);
+        stream << urls;
+        socket.write(payload);
+        socket.flush();
+        socket.waitForBytesWritten(200);
+        socket.disconnectFromServer();
+        return true;
+    }
+    // Start listening. If the socket file is stale (no peer but the file exists
+    // from a crashed instance), remove it and retry. The peer callback is
+    // invoked on incoming connections, including those that send no URLs (a
+    // bare second invocation should still raise the existing window).
+    bool listen(std::function<void(const QStringList &)> onMessage) {
+        auto tryListen = [&] {
+            return m_server->listen(m_socketName);
+        };
+        if (!tryListen()) {
+            QLocalServer::removeServer(m_socketName);
+            if (!tryListen())
+                return false;
+        }
+        connect(m_server, &QLocalServer::newConnection, this, [this, onMessage] {
+            while (auto *socket = m_server->nextPendingConnection()) {
+                connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
+                if (!socket->bytesAvailable())
+                    socket->waitForReadyRead(200);
+                QDataStream stream(socket);
+                stream.setVersion(QDataStream::Qt_6_0);
+                QStringList urls;
+                stream >> urls;
+                if (stream.status() == QDataStream::Ok)
+                    onMessage(urls);
+            }
+        });
+        return true;
+    }
+private:
+    QLocalServer *m_server;
+    QString m_socketName;
+};
+#endif
+
 int main(int argc, char **argv) {
 #ifndef SPUN_DIAGNOSTICS
     // Keep the installed CLI checks available without mapping QtTest or test fixtures
@@ -1685,6 +1752,17 @@ int main(int argc, char **argv) {
     const bool test = parser.isSet("test-subsonic") || parser.isSet("test-jellyfin") || parser.isSet("test-youtube-live") || parser.isSet("test-youtube") || parser.isSet("test-performance") || parser.isSet("test-tx6") || parser.isSet("test-cd-deck") || parser.isSet("test-cassette-deck") || parser.isSet("test-turntable") || parser.isSet("test-recorder") || parser.isSet("test-artwork") || parser.isSet("test-3d-lighting") || parser.isSet("test-3d-ui") || parser.isSet("test-3d-library") || parser.isSet("test-media-ui") || parser.isSet("benchmark") || parser.isSet("test-import-ui") || parser.isSet("self-test") || parser.isSet("smoke-live") || parser.isSet("test-library");
     if(test && qEnvironmentVariableIsSet("SPUN_TEST_SCREEN"))app.setDesktopFileName("spun-diagnostics");
     if (!test && !parser.isSet("config") && !parser.isSet("isolated")) {
+#ifdef Q_OS_MACOS
+        // macOS has no D-Bus session bus; use a per-bundle QLocalServer named
+        // after the reverse-DNS identifier. A peer connected here means the
+        // first instance is already listening, so forward URLs and exit.
+        MacosSingleInstance peer(QStringLiteral("com.yappologistic.spun.spun"));
+        QStringList urls;
+        for (const auto &arg : parser.positionalArguments())
+            urls.append(QUrl::fromUserInput(arg, QDir::currentPath(), QUrl::AssumeLocalFile).toString());
+        if (peer.forward(urls))
+            return 0;
+#else
         auto bus = QDBusConnection::sessionBus();
         if (bus.interface() && bus.interface()->isServiceRegistered("org.mpris.MediaPlayer2.spun")) {
             QDBusInterface shell("org.mpris.MediaPlayer2.spun", "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2", bus);
@@ -1695,6 +1773,7 @@ int main(int argc, char **argv) {
             shell.call("Raise");
             return 0;
         }
+#endif
     }
     QTemporaryDir temp;
     QString configRoot = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
@@ -1716,6 +1795,33 @@ int main(int argc, char **argv) {
     const qint64 fontReady = startup.elapsed();
     Theme theme(configRoot, stateRoot);
     Player player(settings);
+#ifdef Q_OS_MACOS
+    // Begin listening for additional instances now that Player is alive.
+    // The callback is invoked on a fresh QLocalSocket thread; hop to the main
+    // thread before touching Player or windows, and use a QPointer so a peer
+    // that connects during shutdown cannot dereference a destroyed Player.
+    if (!test && !parser.isSet("config") && !parser.isSet("isolated")) {
+        auto *server = new MacosSingleInstance(QStringLiteral("com.yappologistic.spun.spun"), &app);
+        QPointer<Player> playerPtr(&player);
+        if (!server->listen([playerPtr](const QStringList &urls) {
+                QPointer<Player> p = playerPtr;
+                QMetaObject::invokeMethod(qApp, [p, urls] {
+                    if (!p) return;
+                    if (!urls.isEmpty()) {
+                        QList<QUrl> queueUrls;
+                        queueUrls.reserve(urls.size());
+                        for (const auto &u : urls) queueUrls.append(QUrl(u));
+                        p->addUrls(queueUrls);
+                    }
+                    for (auto *window : QGuiApplication::topLevelWindows())
+                        if (window->title() == QLatin1String("Spun")) { window->showNormal(); window->raise(); window->requestActivate(); }
+                }, Qt::QueuedConnection);
+            })) {
+            std::cerr << "Failed to start single-instance server on com.yappologistic.spun.spun; "
+                      << "additional invocations will start their own process." << std::endl;
+        }
+    }
+#endif
     Youtube youtube(QFileInfo(settings).absolutePath() + "/youtube");
     Jellyfin jellyfin(QFileInfo(settings).absolutePath() + "/jellyfin", !test);
     RemoteLibrary subsonic(QFileInfo(settings).absolutePath() + "/subsonic", !test, nullptr,
