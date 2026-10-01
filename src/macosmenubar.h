@@ -32,6 +32,12 @@ public:
     // Mark which Player Type entry matches the current Player.medium.
     // Accepts: "cd" | "vinyl" | "cassette" | "tp7".
     Q_INVOKABLE void setMediumActive(const QString &medium);
+    // Mirror the QML-side guards (`!editingText`, `!menuOpen`) onto the native
+    // menu. A Cocoa key equivalent is consumed before Qt sees the key, so
+    // without this Cmd+Left/Right would skip tracks while the user is moving
+    // the caret in a text field, and Cmd+L/O would act under an open popup.
+    Q_INVOKABLE void setTextEditing(bool editing);
+    Q_INVOKABLE void setOverlayOpen(bool open);
 
 signals:
     // Spun

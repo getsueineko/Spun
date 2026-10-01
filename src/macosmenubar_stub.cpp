@@ -18,3 +18,5 @@ void MacosMenuBar::setRepeatMode(int) {}
 void MacosMenuBar::setSidebarVisible(bool) {}
 void MacosMenuBar::setQueueVisible(bool) {}
 void MacosMenuBar::setMediumActive(const QString &) {}
+void MacosMenuBar::setTextEditing(bool) {}
+void MacosMenuBar::setOverlayOpen(bool) {}

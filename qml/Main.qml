@@ -656,6 +656,13 @@ ApplicationWindow {
         target: player
         function onMediumChanged() { macosMenuBar.setMediumActive(player.medium) }
     }
+    // Keep the native menu's enabled state in step with the guards on the QML
+    // shortcuts above (see MacosMenuBar::setTextEditing / setOverlayOpen).
+    Connections {
+        target: root
+        function onEditingTextChanged() { macosMenuBar.setTextEditing(root.editingText) }
+        function onMenuOpenChanged() { macosMenuBar.setOverlayOpen(root.menuOpen) }
+    }
 
     Rectangle {
         objectName: "blurBackdrop"

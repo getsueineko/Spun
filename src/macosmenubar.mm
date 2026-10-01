@@ -11,8 +11,15 @@
 // back-pointer to the MacosMenuBar and exposes one Obj-C method per menu
 // choice; each method emits the corresponding Qt signal on the main
 // thread.
-@interface SpunMenuActions : NSObject
+// NSMenuItem.tag bits consulted by -validateMenuItem:. They mirror the guards
+// on the equivalent QML Shortcuts in Main.qml.
+static const NSInteger kGuardWhileEditing = 1 << 0;  // QML: !root.editingText
+static const NSInteger kGuardWhileOverlay = 1 << 1;  // QML: !root.menuOpen
+
+@interface SpunMenuActions : NSObject <NSMenuItemValidation>
 @property (nonatomic, assign) MacosMenuBar *owner;
+@property (nonatomic, assign) BOOL textEditing;
+@property (nonatomic, assign) BOOL overlayOpen;
 - (void)emitAbout:(id)sender;
 - (void)emitSettings:(id)sender;
 - (void)emitHideApp:(id)sender;
@@ -40,6 +47,12 @@
 @end
 
 @implementation SpunMenuActions
+- (BOOL)validateMenuItem:(NSMenuItem *)item {
+    const NSInteger tag = [item tag];
+    if ((tag & kGuardWhileEditing) && _textEditing) return NO;
+    if ((tag & kGuardWhileOverlay) && _overlayOpen) return NO;
+    return YES;
+}
 - (void)emitAbout:(id)sender { if (_owner) emit _owner->aboutTriggered(); }
 - (void)emitSettings:(id)sender { if (_owner) emit _owner->settingsTriggered(); }
 - (void)emitHideApp:(id)sender { [NSApp hide:nil]; }
@@ -126,9 +139,11 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
     NSMenuItem *fileItem = [[NSMenuItem alloc] init];
     [fileItem setSubmenu:fileMenu];
     [mainMenu addItem:fileItem];
-    addSignalItem(fileMenu, @"Add Music\u2026", @selector(emitAddMusic:), @"o", NSEventModifierFlagCommand);
-    addSignalItem(fileMenu, @"Add Folder\u2026", @selector(emitAddFolder:),
-                  @"o", NSEventModifierFlagCommand | NSEventModifierFlagShift);
+    [addSignalItem(fileMenu, @"Add Music\u2026", @selector(emitAddMusic:), @"o", NSEventModifierFlagCommand)
+        setTag:kGuardWhileOverlay];
+    [addSignalItem(fileMenu, @"Add Folder\u2026", @selector(emitAddFolder:),
+                   @"o", NSEventModifierFlagCommand | NSEventModifierFlagShift)
+        setTag:kGuardWhileOverlay];
     [fileMenu addItem:[NSMenuItem separatorItem]];
     addSignalItem(fileMenu, @"Close Window", @selector(emitCloseWindow:), @"w", NSEventModifierFlagCommand);
 
@@ -140,6 +155,7 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
                                    @selector(emitToggleSidebar:), @"\\", NSEventModifierFlagCommand);
     d->queueItem = addSignalItem(viewMenu, @"Show Queue",
                                  @selector(emitToggleQueue:), @"l", NSEventModifierFlagCommand);
+    [d->queueItem setTag:kGuardWhileOverlay];
     [viewMenu addItem:[NSMenuItem separatorItem]];
     NSMenu *playerMenu = [[NSMenu alloc] initWithTitle:@"Player Type"];
     NSMenuItem *playerItem = [[NSMenuItem alloc] initWithTitle:@"Player Type"
@@ -161,10 +177,15 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
     // conflict, so we leave the Play menu item without a hotkey.
     d->playPauseItem = addSignalItem(playMenu, @"Play",
                                      @selector(emitPlayPause:), @"", 0);
-    addSignalItem(playMenu, @"Previous Track", @selector(emitPrevious:),
-                  @"\uF702", NSEventModifierFlagCommand); // NSLeftArrow in Cocoa Unicode private area
-    addSignalItem(playMenu, @"Next Track", @selector(emitNext:),
-                  @"\uF703", NSEventModifierFlagCommand); // NSRightArrow
+    // Cmd+Left/Right are also "caret to line start/end" in any text field, so
+    // these two must step aside while text is being edited (see -validateMenuItem:).
+    const unichar leftArrow = NSLeftArrowFunctionKey, rightArrow = NSRightArrowFunctionKey;
+    [addSignalItem(playMenu, @"Previous Track", @selector(emitPrevious:),
+                   [NSString stringWithCharacters:&leftArrow length:1], NSEventModifierFlagCommand)
+        setTag:kGuardWhileEditing | kGuardWhileOverlay];
+    [addSignalItem(playMenu, @"Next Track", @selector(emitNext:),
+                   [NSString stringWithCharacters:&rightArrow length:1], NSEventModifierFlagCommand)
+        setTag:kGuardWhileEditing | kGuardWhileOverlay];
     [playMenu addItem:[NSMenuItem separatorItem]];
     d->shuffleItem = addSignalItem(playMenu, @"Shuffle",
                                    @selector(emitToggleShuffle:),
@@ -184,8 +205,9 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
     // miniaturizable style bit that -performMiniaturize: requires.
     addSignalItem(windowMenu, @"Minimize", @selector(emitMinimize:), @"m",
                   NSEventModifierFlagCommand);
-    addSignalItem(windowMenu, @"Mini Mode", @selector(emitToggleMini:), @"m",
-                  NSEventModifierFlagCommand | NSEventModifierFlagOption);
+    [addSignalItem(windowMenu, @"Mini Mode", @selector(emitToggleMini:), @"m",
+                   NSEventModifierFlagCommand | NSEventModifierFlagOption)
+        setTag:kGuardWhileOverlay];
     [windowMenu addItem:[NSMenuItem separatorItem]];
     addSignalItem(windowMenu, @"Bring All to Front",
                   @selector(emitBringAllToFront:), @"", NSEventModifierFlagCommand);
@@ -284,5 +306,21 @@ void MacosMenuBar::setMediumActive(const QString &medium) {
     apply(d->vinylItem,    medium == QLatin1String("vinyl"));
     apply(d->cassetteItem, medium == QLatin1String("cassette"));
     apply(d->tp7Item,      medium == QLatin1String("tp7"));
+#endif
+}
+
+void MacosMenuBar::setTextEditing(bool editing) {
+#ifdef Q_OS_MACOS
+    d->actions.textEditing = editing;
+#else
+    Q_UNUSED(editing);
+#endif
+}
+
+void MacosMenuBar::setOverlayOpen(bool open) {
+#ifdef Q_OS_MACOS
+    d->actions.overlayOpen = open;
+#else
+    Q_UNUSED(open);
 #endif
 }

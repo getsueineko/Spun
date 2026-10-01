@@ -2023,6 +2023,8 @@ int main(int argc, char **argv) {
     if (window) {
         macosMenuBar.setSidebarVisible(window->property("libraryOpen").toBool());
         macosMenuBar.setQueueVisible(window->property("queueOpen").toBool());
+        macosMenuBar.setTextEditing(window->property("editingText").toBool());
+        macosMenuBar.setOverlayOpen(window->property("menuOpen").toBool());
     }
     if (test && qEnvironmentVariableIsSet("SPUN_TEST_SCREEN")) {
         const auto name=qEnvironmentVariable("SPUN_TEST_SCREEN");
