@@ -1718,7 +1718,15 @@ int main(int argc, char **argv) {
         if (option == "--") break;
         if (option == "--test-subsonic" || option == "--test-jellyfin" || option == "--test-youtube-live" || option == "--test-youtube" || option == "--test-performance" || option == "--self-test" || option == "--test-tx6" || option == "--test-cd-deck" || option == "--test-cassette-deck" || option == "--test-turntable" || option == "--test-recorder" || option == "--test-media-ui" || option == "--test-artwork" || option == "--test-3d-lighting" || option == "--test-3d-ui" || option == "--test-3d-library" || option == "--test-import-ui" || option == "--test-library" || option == "--smoke-live"
             || option == "--verify-cider" || option == "--verify-cider-writes" || option == "--inspect-cider" || option == "--inspect-library") {
+            // QGuiApplication is not constructed yet, so applicationFilePath()
+            // is not available. argv[0] points at the launched binary on macOS
+            // (the absolute path inside Spun.app/Contents/MacOS/Spun); on Linux
+            // /proc/self/exe follows symlinks for the same effect.
+#ifdef Q_OS_LINUX
             const auto executable = QFileInfo(QStringLiteral("/proc/self/exe")).symLinkTarget();
+#else
+            const auto executable = QString::fromLocal8Bit(argv[0]);
+#endif
             const auto diagnostics = QFile::encodeName(QFileInfo(executable).absolutePath() + "/spun-diagnostics");
             execv(diagnostics.constData(), argv);
             std::cerr << "Build diagnostics with scripts/build.sh -DBUILD_TESTING=ON before running checks.\n";
@@ -2053,10 +2061,20 @@ int main(int argc, char **argv) {
             QTimer::singleShot(6000, &app, [&, scene, before, startFrames, renderStats, measurementStart] {
                 struct rusage after{}; getrusage(RUSAGE_SELF, &after);
                 auto cpu = [](const rusage &r) { return r.ru_utime.tv_sec + r.ru_stime.tv_sec + (r.ru_utime.tv_usec + r.ru_stime.tv_usec) / 1e6; };
+#ifdef Q_OS_LINUX
+                // /proc/self/smaps_rollup is a Linux-only source of process
+                // memory accounting. On macOS there is no equivalent that
+                // does not require elevated privileges, so we record an empty
+                // string and rely on macOS's Mach task_info / Activity Monitor
+                // for ad-hoc observation.
                 QFile memory("/proc/self/smaps_rollup");
                 if (!memory.open(QIODevice::ReadOnly)) { app.exit(1); return; }
+                const QString memoryReport = QString::fromUtf8(memory.readAll());
+#else
+                const QString memoryReport;
+#endif
                 QJsonObject result{{"scene",scene},{"firstFrameMs",firstFrame},{"measurementStartMs",measurementStart},{"cpuSeconds",cpu(after)-cpu(before)},
-                    {"frames",frames-startFrames},{"memory",QString::fromUtf8(memory.readAll())},
+                    {"frames",frames-startFrames},{"memory",memoryReport},
                     {"medium",benchmarkMedium},{"objects",window->findChildren<QObject *>().size()}};
                 result["threeDActive"]=window->property("threeDActive").toBool();
                 if(parser.isSet("benchmark-3d"))if(auto *stats=renderStats()) {

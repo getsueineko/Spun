@@ -27,10 +27,16 @@ bool until(const std::function<bool()> &ready, int ms=15000) {
     return ready();
 }
 QJsonObject memory() {
-    QJsonObject result;QFile file("/proc/self/smaps_rollup");
+    QJsonObject result;
+#ifdef Q_OS_LINUX
+    // /proc/self/smaps_rollup is Linux-only. macOS does not expose a similarly
+    // cheap process-wide accounting without elevated privileges, so we leave
+    // the object empty on non-Linux and let downstream tooling fill the gap.
+    QFile file("/proc/self/smaps_rollup");
     if(file.open(QIODevice::ReadOnly))for(const auto &line:file.readAll().split('\n'))
         for(const auto &key:{QByteArray("Rss"),QByteArray("Pss"),QByteArray("Private_Dirty")})
             if(line.startsWith(key+':'))result[QString::fromLatin1(key)+"KiB"]=line.mid(key.size()+1).simplified().split(' ').first().toInt();
+#endif
     return result;
 }
 int verifyMotion(Player &player,QQuickWindow *window) {
