@@ -164,7 +164,19 @@ if(APPLE)
         find_program(CODESIGN_EXECUTABLE codesign)
         if(INSTALL_NAME_TOOL_EXECUTABLE AND CODESIGN_EXECUTABLE)
             set(_bundle "$<TARGET_BUNDLE_DIR:spun>")
-            set(_qml_root "${Qt6_DIR}/../../../share/qt/qml")
+            # Resolve the QML root in this order: explicit SPUN_QML_ROOT env
+            # var → user-supplied cache value → the conventional Homebrew path
+            # derived from Qt6_DIR. SPUN_QML_ROOT lets people point at a Qt
+            # installed via the official installer (where the share path is
+            # <prefix>/macos/share/qt/qml rather than /opt/homebrew/share/qt/qml).
+            if(NOT SPUN_QML_ROOT AND NOT DEFINED SPUN_QML_ROOT_CACHE)
+                set(SPUN_QML_ROOT_CACHE "${Qt6_DIR}/../../../share/qt/qml" CACHE PATH "Qt QML root used by sign-macos-bundle.sh")
+            endif()
+            if(DEFINED ENV{SPUN_QML_ROOT})
+                set(_qml_root "$ENV{SPUN_QML_ROOT}")
+            else()
+                set(_qml_root "${SPUN_QML_ROOT_CACHE}")
+            endif()
             set(_entitlements "${CMAKE_SOURCE_DIR}/resources/spun.entitlements")
             add_custom_command(TARGET spun POST_BUILD
                 COMMAND "${CMAKE_SOURCE_DIR}/scripts/sign-macos-bundle.sh"
