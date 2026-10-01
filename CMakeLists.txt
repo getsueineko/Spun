@@ -156,19 +156,16 @@ function(spun_application target)
 endfunction()
 spun_application(spun)
 if(APPLE)
-    # Configure Info.plist from the template so the bundle id and version
-    # placeholders get the values used elsewhere in this CMake project.
-    # The template uses @SPUN_BUNDLE_ID@ and @SPUN_VERSION@, which CMake
-    # substitutes here. The configured file is also handed to
-    # MACOSX_BUNDLE_INFO_PLIST so Qt copies it into Contents/Info.plist
-    # during the link step (rather than the unresolved template).
+    # Qt's MACOSX_BUNDLE_INFO_PLIST handler copies the template into
+    # Contents/Info.plist during the link step and substitutes
+    # @SPUN_BUNDLE_ID@ / @PROJECT_VERSION@ (defined below) before doing so.
+    # We hand it the source template directly rather than a configure_file
+    # output, because the auto-copy only triggers for paths that live in
+    # the source tree.
     set(SPUN_VERSION "${SPUN_GIT_TAG}")
-    configure_file("${CMAKE_SOURCE_DIR}/resources/Info.plist.in"
-        "${CMAKE_BINARY_DIR}/Spun.app.Info.plist"
-        @ONLY)
     set_target_properties(spun PROPERTIES
         MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/Spun.app.Info.plist"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/resources/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME "Spun"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${SPUN_BUNDLE_ID}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${SPUN_GIT_TAG}"
