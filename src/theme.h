@@ -1,4 +1,5 @@
 #pragma once
+#include <QColor>
 #include <QFileSystemWatcher>
 #include <QObject>
 #include <QTimer>
@@ -32,8 +33,13 @@ signals:
 
 private:
   void watch();
+  void applyOverrideAccent(const QColor &accent, bool emitSignal);
   QString m_config, m_state, m_font = "Adwaita Sans";
   QVariantMap m_colors;
+  // Last accent set via overrideAccent(). Stored separately from m_colors so
+  // a later reload() (triggered by a TOML/CSS change) can re-apply it
+  // instead of clobbering it with whatever Noctalia exports.
+  QColor m_accentOverride;
   qreal m_radius = 1, m_motion = 1;
   QFileSystemWatcher m_watcher;
   QTimer m_debounce;

@@ -155,13 +155,22 @@ void Theme::reload() {
     palette.setColor(QPalette::ToolTipBase, m_colors["card"].value<QColor>());
     palette.setColor(QPalette::ToolTipText, m_colors["text"].value<QColor>());
     qApp->setPalette(palette);
+    // Re-apply a previously-set override after the reload. Without this, a
+    // macOS accent override is silently overwritten by the next TOML/CSS
+    // change and the UI flashes back to the file-based accent.
+    if (m_accentOverride.isValid()) applyOverrideAccent(m_accentOverride, false);
     emit changed();
   }
 }
 void Theme::overrideAccent(const QColor &accent) {
-  if (!accent.isValid() || m_colors.isEmpty()) return;
+  if (!accent.isValid()) return;
+  m_accentOverride = accent;
+  applyOverrideAccent(accent, true);
+}
+void Theme::applyOverrideAccent(const QColor &accent, bool emitSignal) {
+  if (m_colors.isEmpty()) return; // First reload() will replay the override.
   const QColor prevAccent = m_colors.value("accent").value<QColor>();
-  if (prevAccent == accent) return;
+  if (prevAccent == accent && !emitSignal) return;
   const QColor bg = m_colors.value("surface").value<QColor>();
   const QColor fg = m_colors.value("text").value<QColor>();
   const QColor card = m_colors.value("card").value<QColor>();
@@ -173,5 +182,5 @@ void Theme::overrideAccent(const QColor &accent) {
   palette.setColor(QPalette::Highlight, accent);
   palette.setColor(QPalette::HighlightedText, m_colors["onAccent"].value<QColor>());
   qApp->setPalette(palette);
-  emit changed();
+  if (emitSignal) emit changed();
 }
