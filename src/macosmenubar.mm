@@ -112,9 +112,9 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
     addSignalItem(appMenu,
                   [NSString stringWithFormat:@"Hide %@", appName],
                   @selector(emitHideApp:), @"h", NSEventModifierFlagCommand);
-    addSignalItem(appMenu, @"Hide Others", @selector(emitHideOthers:), @"h", NSEventModifierFlagCommand);
-    addSignalItem(appMenu, @"Show All", @selector(emitShowAll:), @"",
-                  NSEventModifierFlagCommand | NSEventModifierFlagOption);
+    addSignalItem(appMenu, @"Hide Others", @selector(emitHideOthers:),
+                  @"h", NSEventModifierFlagCommand | NSEventModifierFlagOption);
+    addSignalItem(appMenu, @"Show All", @selector(emitShowAll:), @"", 0);
     [appMenu addItem:[NSMenuItem separatorItem]];
     addSignalItem(appMenu,
                   [NSString stringWithFormat:@"Quit %@", appName],
@@ -154,11 +154,15 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
     NSMenuItem *playItem = [[NSMenuItem alloc] init];
     [playItem setSubmenu:playMenu];
     [mainMenu addItem:playItem];
+    // Space is left to the QML Shortcut in Main.qml; Cmd+Space belongs to
+    // Spotlight on macOS and binding it here would either be a no-op or a
+    // conflict, so we leave the Play menu item without a hotkey.
     d->playPauseItem = addSignalItem(playMenu, @"Play",
-                                     @selector(emitPlayPause:), @" ", NSEventModifierFlagCommand);
+                                     @selector(emitPlayPause:), @"", 0);
     addSignalItem(playMenu, @"Previous Track", @selector(emitPrevious:),
-                  @"", 0);
-    addSignalItem(playMenu, @"Next Track", @selector(emitNext:), @"", 0);
+                  @"\uF702", NSEventModifierFlagCommand); // NSLeftArrow in Cocoa Unicode private area
+    addSignalItem(playMenu, @"Next Track", @selector(emitNext:),
+                  @"\uF703", NSEventModifierFlagCommand); // NSRightArrow
     [playMenu addItem:[NSMenuItem separatorItem]];
     d->shuffleItem = addSignalItem(playMenu, @"Shuffle",
                                    @selector(emitToggleShuffle:),
@@ -171,7 +175,10 @@ MacosMenuBar::MacosMenuBar(QObject *parent) : QObject(parent), d(new Private) {
     NSMenuItem *windowItem = [[NSMenuItem alloc] init];
     [windowItem setSubmenu:windowMenu];
     [mainMenu addItem:windowItem];
-    addSignalItem(windowMenu, @"Mini Mode", @selector(emitToggleMini:), @"m", NSEventModifierFlagCommand);
+    // Cmd+M is reserved by macOS for Minimize Window. Use Cmd+Opt+M for
+    // Spun's Mini Mode so users can still minimize the window normally.
+    addSignalItem(windowMenu, @"Mini Mode", @selector(emitToggleMini:), @"m",
+                  NSEventModifierFlagCommand | NSEventModifierFlagOption);
     [windowMenu addItem:[NSMenuItem separatorItem]];
     addSignalItem(windowMenu, @"Bring All to Front",
                   @selector(emitBringAllToFront:), @"", NSEventModifierFlagCommand);

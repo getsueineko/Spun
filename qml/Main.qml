@@ -669,9 +669,9 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+K"; enabled: !root.menuOpen || quickJump.visible; onActivated: { root.revealChrome(); quickJump.visible ? quickJump.close() : root.openQuickJump() } }
     Shortcut { sequence: "Space"; enabled: !(root.activeFocusItem instanceof AbstractButton && root.activeFocusItem.visualFocus) && !(root.useCider && root.queueOpen && trackList.activeFocus) && !(root.libraryOpen && musicBrowser.item && musicBrowser.item.trackListFocused) && !root.editingText && !root.menuOpen; onActivated: { root.revealChrome(); root.deckPlayer.count ? root.deckPlayer.toggle() : (root.useYoutube || root.useServer) ? root.openLibrary() : root.useCider ? root.ciderService.toggle() : openMusicDialog() } }
     Shortcut { sequence: "Ctrl+V"; enabled: !root.editingText && !root.menuOpen; onActivated: { root.revealChrome(); root.openMusicLink("", true) } }
-    Shortcut { sequence: "Ctrl+O"; enabled: !root.menuOpen; onActivated: { root.revealChrome(); openMusicDialog() } }
-    Shortcut { sequence: "Ctrl+Shift+O"; enabled: !root.menuOpen; onActivated: { root.revealChrome(); openFolderDialog() } }
-    Shortcut { sequence: "Ctrl+Q"; onActivated: { root.revealChrome(); Qt.quit() } }
+    Shortcut { sequence: "Ctrl+O"; enabled: !root.menuOpen && Qt.platform.os !== "osx"; onActivated: { root.revealChrome(); openMusicDialog() } }
+    Shortcut { sequence: "Ctrl+Shift+O"; enabled: !root.menuOpen && Qt.platform.os !== "osx"; onActivated: { root.revealChrome(); openFolderDialog() } }
+    Shortcut { sequence: "Ctrl+Q"; enabled: Qt.platform.os !== "osx"; onActivated: { root.revealChrome(); Qt.quit() } }
     Shortcut { sequence: "Ctrl+F"; enabled: !root.menuOpen; onActivated: { root.revealChrome(); root.libraryOpen ? (root.useServer ? serverBrowser.item.focusSearch() : root.useYoutube ? youtubeBrowser.item.focusSearch() : musicBrowser.focusSearch()) : root.openQueueSearch() } }
     Shortcut { sequence: "Ctrl+B"; enabled: (root.useCider || root.useYoutube || root.useServer) && !root.menuOpen; onActivated: { root.revealChrome(); root.openLibrary() } }
     Shortcut { sequence: "Ctrl+L"; enabled: !root.menuOpen; onActivated: { root.revealChrome(); root.toggleQueue() } }
