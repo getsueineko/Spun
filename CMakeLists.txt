@@ -119,15 +119,9 @@ function(spun_application target)
 endfunction()
 spun_application(spun)
 if(APPLE)
-    # Substitute version + bundle id into Info.plist.in so the custom plist
-    # matches the MACOSX_BUNDLE_* target properties without two sources of
-    # truth that could drift apart on a release bump.
-    set(_info_plist_src "${CMAKE_SOURCE_DIR}/resources/Info.plist.in")
-    set(_info_plist_dst "${CMAKE_CURRENT_BINARY_DIR}/Spun.app.Info.plist")
-    configure_file("${_info_plist_src}" "${_info_plist_dst}" @ONLY)
     set_target_properties(spun PROPERTIES
         MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_INFO_PLIST "${_info_plist_dst}"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/resources/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME "Spun"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${SPUN_BUNDLE_ID}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
