@@ -2,6 +2,8 @@
 # New top-level directories or file types must be added here deliberately.
 /*
 !/.gitignore
+!/.github/
+!/.github/workflows/
 !/CMakeLists.txt
 !/README.md
 !/LICENSE

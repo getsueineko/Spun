@@ -168,7 +168,16 @@ To launch the resulting bundle directly (bypassing LaunchServices):
 ./build/Spun.app/Contents/MacOS/Spun
 ```
 
-**Heads-up on duplicate-class warnings.** If you have Homebrew's `qt` package installed (as the build requires), macOS will load both `Spun.app/Contents/Frameworks/QtCore.framework` and `/opt/homebrew/Cellar/qtbase/.../QtCore.framework` at the same time. You will see five or six lines in the system log along the lines of `objc[Spun]: Class QT_PREPEND_NAMESPACE(QCocoaApplicationDelegate) is implemented in both ... One of the two will be used. Which one is undefined.` They are harmless: the bundled Qt is the one actually wired into the app via `@rpath`, and the homebrew copy is loaded by the Objective-C runtime only for class lookups that resolve identically. A user who installed Spun via Homebrew without the Qt build dependency installed will not see these. They are a dev-machine artifact and safe to ignore.
+**Why `Class X is implemented in both` warnings appear during development.** macOS scans `/opt/homebrew/lib` (and the rest of the implicit framework search path) in addition to the bundle's own Frameworks directory. When Homebrew's `qt` formula is installed, the runtime loads both the bundled QtCore and the Homebrew QtCore, and the Objective-C runtime prints one `objc[Spun]: Class QT_PREPEND_NAMESPACE(QCocoaApplicationDelegate) is implemented in both ...` line per colliding class. The bundled Qt is the one wired into the app via `@rpath`; the Homebrew copy is loaded for class lookups only.
+
+`scripts/sign-macos-bundle.sh` rewrites every `/opt/homebrew/...` reference in the bundle to `@rpath/...`, then scans every executable for stray references and aborts with a list of offenders if any are found. You can verify your bundle is clean with:
+
+```sh
+find build/Spun.app/Contents -type f -perm +111 -exec otool -L {} \; \
+    | grep '/opt/homebrew' || echo "Bundle is clean."
+```
+
+If that prints nothing, your local Qt was fully rewritten and the warnings you see come from `/opt/homebrew/lib` still being on macOS's implicit search path, not from anything inside the bundle. They do not affect a user who installs Spun via the published `.app` (no Homebrew Qt on their machine).
 
 </details>
 
@@ -389,7 +398,7 @@ You can then delete the Spun source folder. Your music stays where it was. Prefe
 - **A font is missing:** install it, reopen Spun and select it again. An unavailable saved font falls back to the system font.
 - **An audio file will not play:** supported formats depend on the codecs available to Qt Multimedia on your distribution.
 - **"Spun.app is damaged and can't be opened" on macOS:** the ad-hoc signature is intact but the file has the `com.apple.quarantine` xattr. Run `xattr -dr com.apple.quarantine /Applications/Spun.app` or move the app out of and back into `/Applications` (Finder re-extends quarantine to downloads). The right-click → Open workaround described in [First launch on macOS](#first-launch-on-macos) is the supported path.
-- **`objc[...] Class X is implemented in both` warnings on macOS:** expected on developer machines that have Homebrew's `qt` formula installed. Harmless; see the note in [Build on macOS](#install).
+- **`objc[...] Class X is implemented in both` warnings on macOS:** symptom of `/opt/homebrew/lib` still being on macOS's implicit framework search path while a Homebrew Qt is installed. The bundle's own binaries are clean — `sign-macos-bundle.sh` rewrites every `/opt/homebrew` reference and fails the build if any survive. Verify with `find build/Spun.app/Contents -type f -perm +111 -exec otool -L {} \; | grep '/opt/homebrew'` (no output = clean). See [Build on macOS](#install) for the full explanation.
 
 Spun does not ask for your Apple Music password. Its Cider token is stored with owner-only file permissions in `~/.config/spun/cider-connection.json`. Preferences and local listening data also stay in `~/.config/spun/`. Artwork and music metadata may be fetched during playback and browsing. Do not include tokens, private configuration, listening history or personal logs in issue reports.
 
