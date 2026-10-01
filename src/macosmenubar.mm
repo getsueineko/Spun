@@ -193,6 +193,9 @@ MacosMenuBar::~MacosMenuBar() {
     [NSApp setMainMenu:nil];
     [NSApp setWindowsMenu:nil];
     [NSApp setHelpMenu:nil];
+    // Clear the back-pointer before `delete d` so a Cocoa target/action that
+    // still holds d->actions cannot dispatch into a destroyed MacosMenuBar.
+    if (d->actions) d->actions.owner = nullptr;
 #endif
     delete d;
 }
