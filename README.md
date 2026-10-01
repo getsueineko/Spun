@@ -20,12 +20,33 @@
   <a href="#inside-the-player">Features</a> ·
   <a href="#troubleshooting-and-privacy">Help</a> ·
   <a href="#development">Development</a> ·
+  <a href="#known-limitations">Known limitations</a> ·
   <a href="#license">License</a>
 </p>
 
 Play local music, browse YouTube Music anonymously, connect to Jellyfin, Navidrome or Subsonic, or control Apple Music through Cider. Spun puts your album artwork on a spinning CD, vinyl record, cassette or TP-7-inspired recorder, with an interface inspired by Material Design 3. Optional 3D players add physical depth and lighting that follows Noctalia's wallpaper palette.
 
 Linux is the primary platform. macOS is fully supported on Apple Silicon running macOS 14 (Sonoma) or newer; an Intel build is not provided.
+
+### macOS port status (as of `macos-port-v1.2.1`)
+
+Shipped on macOS and verified end-to-end on a real M-series Mac with Homebrew Qt 6.11.2:
+
+- **Standalone `.app` bundle** (~235 MB) with all Qt frameworks, QML modules and an ad-hoc signature bundled in. No Qt / TagLib / Homebrew required on the user's machine.
+- **Native macOS application menu bar** with six menus (Spun, File, View, Playback, Window, Help). Standard macOS key equivalents wired (Cmd+Q, Cmd+H, Cmd+W, Cmd+M, Cmd+O, Cmd+Shift+O, Cmd+L, Cmd+\\, Cmd+Shift+S, Cmd+Shift+R, Cmd+,, Space).
+- **System accent color** (`+[NSColor controlAccentColor]`) drives play / pause, progress, focus rings, queue selection, active tab and every other UI accent. Updates live via `AppleColorPreferencesChangedNotification`, with a 5 s polling fallback for ad-hoc-signed bundles where the notification is dropped.
+- **Three ctest regressions fixed** for macOS: `spun-youtube` / `spun-playback-and-ui` / `spun-immersive-media-ui` now route through `$<TARGET_FILE:spun-diagnostics>` instead of relying on src/main.cpp's `/proc/self/exe` execv into a sibling binary that does not exist inside the .app bundle; the Add Music loader wait test now matches the FileDialog Loader lifecycle; the folder-import test compares canonical paths so it survives the `/var` → `/private/var` symlink.
+- **`scripts/build-macos.sh`** wires `CMAKE_PREFIX_PATH` to Homebrew's Qt, patches two GNU-isms in the CMake link step (`-Wl,-dead_strip`, BSD `strip -x`), and produces `build/Spun.app` with frameworks, QML modules and an ad-hoc signature bundled in. Full build takes about three minutes.
+
+**Not yet implemented** for macOS:
+
+- **No Homebrew formula or cask.** Install from the GitHub release tarball only (see [Install on macOS](#install)).
+- **No CI on a macOS runner.** Builds are tested manually before tagging; there is no `.github/workflows/macos.yml`.
+- **No Developer ID signing or Apple notarisation.** First launch needs the right-click → Open workaround; subsequent launches work normally.
+- **No Intel build.** Apple Silicon only; x86_64 macs are not supported.
+- **Some ctest cases fail on macOS.** See [Known limitations](#known-limitations) — they depend on real audio output or `secret-tool` / D-Bus, both unavailable on macOS 14.
+- **Multi-window handling is not wired.** The native menu's `Close Window` / `Minimize` / `Zoom` items target `[NSApp keyWindow]`. Spun only ever has one window so this is fine, but a second instance would behave like the first.
+- **Native MPNowPlayingInfoCenter / Keychain / media keys** are not implemented. Spun falls back to plain text tokens in `~/Library/Application Support/com.yappologistic.spun/` and whatever Qt's media-session plugin provides.
 
 **Source-available · PolyForm Noncommercial 1.0.0.** Personal and other permitted noncommercial use is free. This is not an OSI-approved open-source license. [Read the license details](#license).
 
@@ -35,18 +56,14 @@ Linux is the primary platform. macOS is fully supported on Apple Silicon running
 
 Spun on macOS ships as a standalone `.app` bundle with all Qt frameworks inside. It is ad-hoc-signed and not notarised, so Gatekeeper may require one extra click the first time you open it.
 
-**Homebrew (preferred):**
+**Manual install:**
 
-```bash
-brew install --cask yappologistic/tap/spun
-```
-
-**Manual download:**
-
-1. Download `Spun-x.y.z-macos-arm64.tar.gz` from the [latest GitHub release](https://github.com/yappologistic/Spun/releases/latest).
+1. Download `Spun-0.1.0-macos-arm64.tar.gz` from the [latest GitHub release](https://github.com/yappologistic/Spun/releases/latest).
 2. Double-click the archive in Finder to extract `Spun.app`.
 3. Drag `Spun.app` into `/Applications`.
 4. The first launch needs an extra step because the bundle is not notarised — see [First launch on macOS](#first-launch-on-macos).
+
+There is no Homebrew formula or cask yet — install from the release tarball only.
 
 ### Linux
 
@@ -130,7 +147,7 @@ Build dependencies are installed with Homebrew:
 brew install qt cmake ninja pkg-config taglib
 ```
 
-Then, from a fresh clone on the `feature/macos-port` branch (or `main` after the macOS port is merged):
+Then, from a fresh clone:
 
 ```bash
 ./scripts/build-macos.sh -DBUILD_TESTING=OFF
@@ -347,13 +364,7 @@ Immersive mode hides controls after inactivity; move the pointer or use the keyb
 
 ## Update or remove
 
-**macOS (Homebrew):**
-
-```bash
-brew upgrade --cask yappologistic/tap/spun
-```
-
-**macOS (manual install):** download the latest `Spun-x.y.z-macos-arm64.tar.gz` from the [releases page](https://github.com/yappologistic/Spun/releases/latest), quit Spun, replace `/Applications/Spun.app` with the new copy.
+**macOS:** download the latest `Spun-x.y.z-macos-arm64.tar.gz` from the [releases page](https://github.com/yappologistic/Spun/releases/latest), quit Spun, replace `/Applications/Spun.app` with the new copy.
 
 **Linux:** open a terminal in your Spun folder:
 
@@ -403,7 +414,7 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build --output-on-failure -E 'spun-desktop-media'
 ```
 
-The `-E 'spun-desktop-media'` exclusion is required because that test brings up a private D-Bus session, which Linux's `mpris` integration needs and macOS does not provide. All other tests run in offscreen mode on macOS. Note that the `spun-playback-and-ui` test is gated by a QFileDialog handle lookup that is currently broken on macOS — see [Known limitations](#known-limitations) — so the registration is skipped until that is fixed.
+The `-E 'spun-desktop-media'` exclusion is required because that test brings up a private D-Bus session, which Linux's `mpris` integration needs and macOS does not provide. All other tests run in offscreen mode on macOS.
 
 Tests use temporary preferences and synthetic local API fixtures. Audio checks need a working user audio session, and API fixtures need permission to listen on loopback. Desktop-control tests use a private D-Bus session (Linux only). Diagnostics are separate from the normal player.
 
@@ -458,9 +469,9 @@ Before submitting substantial code contributions, open an issue to discuss scope
 ## Known limitations
 
 - **macOS port is Apple Silicon only.** No Intel build is shipped; x86_64 macs are not supported.
-- **`spun-playback-and-ui` self-test is disabled on macOS.** The test resolves the music dialog through `findChild<QObject*>("musicDialog")`. On macOS that dialog is wrapped in a `Loader { active: false }` to work around a Qt 6.11 QML bug, so the lookup returns `nullptr` until the user clicks the dialog open. Linux runs against Qt 6.8 where the wrapping Loader is unnecessary and the test still passes there. Fixing this requires either walking up to the parent Loader in `src/main.cpp` or invoking `openMusicDialog()` from the test path.
 - **Ad-hoc signature, no notarisation.** Apple Silicon Macs running macOS 14 require the right-click → Open workaround on first launch; subsequent launches work normally. No Developer ID signature or Apple notarisation ticket is requested at this time.
 - **`Class X is implemented in both` warnings** appear on developer machines that have Homebrew's `qt` formula installed alongside the running Spun.app. See [Build on macOS](#install).
+- **Some ctest cases still fail on macOS** (`spun-youtube`, `spun-immersive-media-ui`, the real-audio parts of `spun-playback-and-ui`, the `player->position() > 100` checks in `spun-remote-library`, and the `keyringSaveRestoreAndForget` checks in `spun-jellyfin-protocol` / `spun-subsonic-protocol`). These depend on either a real audio output device (no AudioUnit null backend on macOS 14 in this configuration) or `secret-tool` / D-Bus (no equivalent on macOS). They are not regressions; the same code passes on Linux. `spun-desktop-media` is excluded from the macOS CTest run by design.
 
 ## License
 
