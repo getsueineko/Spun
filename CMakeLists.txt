@@ -10,7 +10,7 @@ set(SPUN_BUNDLE_ID "com.yappologistic.spun" CACHE STRING "Reverse-DNS bundle ide
 # "unknown" keeps out-of-tree builds from looking like a tagged release.
 find_package(Git QUIET)
 set(SPUN_BUILD_DESC "unknown")
-set(SPUN_GIT_TAG "0.1.0")
+set(SPUN_GIT_TAG "${PROJECT_VERSION}")
 if(GIT_FOUND)
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" describe --tags --always --dirty
@@ -37,6 +37,13 @@ if(GIT_FOUND)
         string(REGEX REPLACE "^.*-v" "" SPUN_GIT_TAG "${SPUN_GIT_TAG_RAW}")
         string(REGEX REPLACE "^v" "" SPUN_GIT_TAG "${SPUN_GIT_TAG}")
     endif()
+endif()
+# CFBundleVersion / CFBundleShortVersionString must be dotted numbers. A tag
+# such as "release-2.0" or "nightly" would leave something else behind after
+# the regex strips above, so fall back to the project version instead.
+if(NOT SPUN_GIT_TAG MATCHES "^[0-9]+(\\.[0-9]+)*$")
+    message(STATUS "Tag '${SPUN_GIT_TAG}' is not a dotted number; using project version ${PROJECT_VERSION} for the bundle")
+    set(SPUN_GIT_TAG "${PROJECT_VERSION}")
 endif()
 message(STATUS "Spun build description: ${SPUN_BUILD_DESC} (tag ${SPUN_GIT_TAG})")
 set(CMAKE_CXX_STANDARD 20)
@@ -164,7 +171,7 @@ spun_application(spun)
 if(APPLE)
     # Qt's MACOSX_BUNDLE_INFO_PLIST handler copies the template into
     # Contents/Info.plist during the link step and substitutes
-    # @SPUN_BUNDLE_ID@ / @PROJECT_VERSION@ (defined below) before doing so.
+    # @SPUN_BUNDLE_ID@ / @SPUN_VERSION@ (defined below) before doing so.
     # We hand it the source template directly rather than a configure_file
     # output, because the auto-copy only triggers for paths that live in
     # the source tree.

@@ -1768,7 +1768,7 @@ int main(int argc, char **argv) {
 #endif
     const qint64 applicationReady = startup.elapsed();
     app.setApplicationName("spun"); app.setApplicationDisplayName("Spun");
-    app.setOrganizationName("Spun"); app.setApplicationVersion("0.1.0");
+    app.setOrganizationName("Spun");
     app.setDesktopFileName("spun"); app.setWindowIcon(QIcon(":/assets/spun-window.png"));
     QCommandLineParser parser; parser.addHelpOption(); parser.addVersionOption();
     parser.addOption({"benchmark", "Measure an isolated startup, idle, playing, mini, or cycle scene", "scene"});
