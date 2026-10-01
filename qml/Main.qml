@@ -364,7 +364,7 @@ ApplicationWindow {
         if (libraryOpen) { player.miniMode = false; queueOpen = false; closeQueueSearch() }
         syncLibrary()
         Qt.callLater(updateMask)
-        if (typeof macosMenuBar !== "undefined") macosMenuBar.setSidebarVisible(libraryOpen)
+        macosMenuBar.setSidebarVisible(libraryOpen)
     }
     function openMusicLink(text, clipboard) {
         if(useYoutube){if(clipboard)youtube.openClipboardLink();else youtube.search(text);libraryOpen=true;return true}
@@ -582,7 +582,7 @@ ApplicationWindow {
                 SpunText { text: "Spun"; font.pixelSize: SpunStyle.title; font.weight: Font.Medium; color: root.ink; Layout.alignment: Qt.AlignHCenter }
                 SpunText {
                     Layout.alignment: Qt.AlignHCenter
-                    text: "Version " + (Qt.platform.os === "osx" ? Qt.application.version : Qt.application.version)
+                    text: "Version " + Qt.application.version
                     color: root.mutedInk; font.pixelSize: SpunStyle.body
                 }
                 SpunText {
@@ -616,7 +616,7 @@ ApplicationWindow {
         queueMenu.close(); cancelQueueDrag(); if (queueOpen) libraryOpen = false
         if (!queueOpen) closeQueueSearch(); if (queueOpen && miniMode) player.miniMode = false
         root.ciderService.queueVisible = queueOpen && useCider; Qt.callLater(updateMask)
-        if (typeof macosMenuBar !== "undefined") macosMenuBar.setQueueVisible(queueOpen)
+        macosMenuBar.setQueueVisible(queueOpen)
     }
     onHelpOpenChanged: { if (helpOpen && miniMode) player.miniMode = false; Qt.callLater(updateMask) }
     onMenuOpenChanged: Qt.callLater(updateMask)
@@ -624,10 +624,10 @@ ApplicationWindow {
     Component.onCompleted: { if (!testMode && player.ciderAutoStart) { useCider = true; root.ciderService.ensureRunning() }; updateMask(); platformNative.place(root); Qt.callLater(presentDisc); syncLyrics() }
     onClosing: player.save()
     // macOS native application menu bar: route its choices through the same
-    // public methods the QML buttons use. macosMenuBar is set as a context
-    // property in src/main.cpp before engine.load, so it is always defined
-    // when this QML is parsed on macOS; on other platforms it is undefined
-    // and Connections simply does not bind anything.
+    // public methods the QML buttons use. macosMenuBar is always registered
+    // as a context property (a no-op stub on non-macOS, the real menu on
+    // macOS), so the QML side does not need to gate its bindings on
+    // Qt.platform.os.
     Connections {
         target: macosMenuBar
         function onAboutTriggered() { root.showAboutDialog() }
@@ -647,13 +647,13 @@ ApplicationWindow {
     }
     Connections {
         target: root.deckPlayer
-        function onPlayingChanged() { if (macosMenuBar) macosMenuBar.setPlaybackPlaying(root.deckPlayer.playing) }
-        function onShuffleChanged() { if (macosMenuBar) macosMenuBar.setShuffleChecked(root.deckPlayer.shuffle) }
-        function onRepeatModeChanged() { if (macosMenuBar) macosMenuBar.setRepeatMode(root.deckPlayer.repeatMode) }
+        function onPlayingChanged() { macosMenuBar.setPlaybackPlaying(root.deckPlayer.playing) }
+        function onShuffleChanged() { macosMenuBar.setShuffleChecked(root.deckPlayer.shuffle) }
+        function onRepeatModeChanged() { macosMenuBar.setRepeatMode(root.deckPlayer.repeatMode) }
     }
     Connections {
         target: player
-        function onMediumChanged() { if (macosMenuBar) macosMenuBar.setMediumActive(player.medium) }
+        function onMediumChanged() { macosMenuBar.setMediumActive(player.medium) }
     }
 
     Rectangle {

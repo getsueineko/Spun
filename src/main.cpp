@@ -1991,22 +1991,32 @@ int main(int argc, char **argv) {
             });
     });
     if(test) player.setShowPlayerBody(false);
-#ifdef Q_OS_MACOS
     // Build the native macOS application menu bar (Spun / File / View /
     // Playback / Window / Help) and expose it BEFORE engine.load so the
     // QML 'Connections { target: macosMenuBar }' bindings find a real
     // target the moment Main.qml is parsed. attachToWindow runs after
-    // load because it needs the QQuickWindow.
+    // load because it needs the QQuickWindow. On non-macOS platforms
+    // MacosMenuBar is a no-op stub (see macosmenubar.mm) so we always
+    // register a single context property and the QML side does not need
+    // to gate its bindings on Qt.platform.os.
     MacosMenuBar macosMenuBar;
     engine.rootContext()->setContextProperty("macosMenuBar", &macosMenuBar);
-#endif
     engine.load(QUrl("qrc:/qml/Main.qml"));
     qmlReady = startup.elapsed();
     if (engine.rootObjects().isEmpty()) return 1;
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
-#ifdef Q_OS_MACOS
     macosMenuBar.attachToWindow(window);
-#endif
+    // Push the initial Player state into the native menu once, so the menu
+    // is consistent with the QML chrome from the first frame instead of
+    // waiting for the first onPlayingChanged / onMediumChanged signal.
+    macosMenuBar.setPlaybackPlaying(player.playing());
+    macosMenuBar.setShuffleChecked(player.shuffle());
+    macosMenuBar.setRepeatMode(player.repeatMode());
+    macosMenuBar.setMediumActive(player.medium());
+    if (window) {
+        macosMenuBar.setSidebarVisible(window->property("libraryOpen").toBool());
+        macosMenuBar.setQueueVisible(window->property("queueOpen").toBool());
+    }
     if (test && qEnvironmentVariableIsSet("SPUN_TEST_SCREEN")) {
         const auto name=qEnvironmentVariable("SPUN_TEST_SCREEN");
         QScreen *screen=nullptr;
