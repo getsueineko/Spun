@@ -4,6 +4,41 @@ project(Spun VERSION 0.1.0 LANGUAGES CXX)
 # CMake variable so Info.plist, MACOSX_BUNDLE_GUI_IDENTIFIER and the
 # single-instance server all see the same string.
 set(SPUN_BUNDLE_ID "com.yappologistic.spun" CACHE STRING "Reverse-DNS bundle identifier used for the macOS app")
+# Capture a stable build description once at configure time so the About
+# dialog can show "tag-N-gabcdef" and CFBundleVersion / ShortVersionString
+# stay in sync with the commit the binary was produced from. The fallback
+# "unknown" keeps out-of-tree builds from looking like a tagged release.
+find_package(Git QUIET)
+set(SPUN_BUILD_DESC "unknown")
+set(SPUN_GIT_TAG "0.1.0")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" describe --tags --always --dirty
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE SPUN_BUILD_DESC_RAW
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE SPUN_BUILD_DESC_RESULT
+    )
+    if(SPUN_BUILD_DESC_RESULT EQUAL 0 AND NOT SPUN_BUILD_DESC_RAW STREQUAL "")
+        set(SPUN_BUILD_DESC "${SPUN_BUILD_DESC_RAW}")
+    endif()
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" describe --tags --abbrev=0
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE SPUN_GIT_TAG_RAW
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE SPUN_GIT_TAG_RESULT
+    )
+    if(SPUN_GIT_TAG_RESULT EQUAL 0 AND NOT SPUN_GIT_TAG_RAW STREQUAL "")
+        # Strip any leading path-like prefix (e.g. macos-port-v1.2.1 -> 1.2.1)
+        # so CFBundleVersion stays numeric-only as required by macOS.
+        string(REGEX REPLACE "^.*-v" "" SPUN_GIT_TAG "${SPUN_GIT_TAG_RAW}")
+        string(REGEX REPLACE "^v" "" SPUN_GIT_TAG "${SPUN_GIT_TAG}")
+    endif()
+endif()
+message(STATUS "Spun build description: ${SPUN_BUILD_DESC} (tag ${SPUN_GIT_TAG})")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -105,6 +140,8 @@ function(spun_application target)
     qt_add_resources(${target} "${target}_assets" PREFIX "/"
         FILES ${SPUN_SYMBOLS} assets/spun-window.png licenses/MaterialSymbols-LICENSE.txt
         OPTIONS ${asset_compression})
+    target_compile_definitions(${target} PRIVATE
+        SPUN_BUILD_DESC="${SPUN_BUILD_DESC}")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(${target} PRIVATE "$<$<CONFIG:Release>:${SPUN_SIZE_OPTIMIZATION};-ffunction-sections;-fdata-sections>")
         if(NOT APPLE)
@@ -119,13 +156,23 @@ function(spun_application target)
 endfunction()
 spun_application(spun)
 if(APPLE)
+    # Configure Info.plist from the template so the bundle id and version
+    # placeholders get the values used elsewhere in this CMake project.
+    # The template uses @SPUN_BUNDLE_ID@ and @SPUN_VERSION@, which CMake
+    # substitutes here. The configured file is also handed to
+    # MACOSX_BUNDLE_INFO_PLIST so Qt copies it into Contents/Info.plist
+    # during the link step (rather than the unresolved template).
+    set(SPUN_VERSION "${SPUN_GIT_TAG}")
+    configure_file("${CMAKE_SOURCE_DIR}/resources/Info.plist.in"
+        "${CMAKE_BINARY_DIR}/Spun.app.Info.plist"
+        @ONLY)
     set_target_properties(spun PROPERTIES
         MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/resources/Info.plist.in"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/Spun.app.Info.plist"
         MACOSX_BUNDLE_BUNDLE_NAME "Spun"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${SPUN_BUNDLE_ID}"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${SPUN_GIT_TAG}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${SPUN_GIT_TAG}"
         MACOSX_BUNDLE_COPYRIGHT "Copyright (c) 2026 Spun contributors"
         OUTPUT_NAME "Spun"
     )

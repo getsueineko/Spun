@@ -1748,6 +1748,11 @@ int main(int argc, char **argv) {
 #else
     QGuiApplication app(argc, argv);
 #endif
+    // Qt.application.version is read by the About dialog and by every
+    // --version printout; the value comes from the build system (SPUN_BUILD_DESC
+    // is set in CMakeLists.txt from `git describe --tags --always --dirty`),
+    // not from project(VERSION ...) so it tracks the actual commit.
+    QCoreApplication::setApplicationVersion(QString::fromUtf8(SPUN_BUILD_DESC));
     // Some Wayland/OpenGL integrations default to Qt's basic 16 ms animation
     // driver. Use the vsync-driven loop for the native hardware renderer.
     // Keep software rendering and explicit compatibility overrides intact.
@@ -1925,6 +1930,8 @@ int main(int argc, char **argv) {
     qmlRegisterType<ArtworkView>("Spun", 1, 0, "ArtworkView");
     qmlRegisterType<ProgressRing>("Spun", 1, 0, "ProgressRing");
     QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("spunBuildDesc",
+        QString::fromUtf8(SPUN_BUILD_DESC));
     if(test) QObject::connect(&engine, &QQmlEngine::warnings, &app, [](const QList<QQmlError> &errors) {
         for(const auto &error:errors) std::cerr << "QML " << error.toString().toStdString() << std::endl;
     });

@@ -582,7 +582,7 @@ ApplicationWindow {
                 SpunText { text: "Spun"; font.pixelSize: SpunStyle.title; font.weight: Font.Medium; color: root.ink; Layout.alignment: Qt.AlignHCenter }
                 SpunText {
                     Layout.alignment: Qt.AlignHCenter
-                    text: "Version " + Qt.application.version
+                    text: "Version " + (typeof spunBuildDesc !== "undefined" ? spunBuildDesc : Qt.application.version)
                     color: root.mutedInk; font.pixelSize: SpunStyle.body
                 }
                 SpunText {
