@@ -1668,6 +1668,45 @@ private:
     QLocalServer *m_server;
     QString m_socketName;
 };
+
+// QGuiApplication does not deliver QFileOpenEvent on its own; we subclass to
+// capture every Finder/Dock file-open request, buffer the URLs until Player is
+// constructed, and forward them through Player::addUrls afterwards.
+class MacosApplication : public QGuiApplication {
+    Q_OBJECT
+public:
+    MacosApplication(int &argc, char **argv) : QGuiApplication(argc, argv) {}
+    // Returns every buffered URL and clears the buffer. Called after Player is
+    // constructed so late additions, restarts, and the initial event all funnel
+    // through the same code path.
+    QList<QUrl> takePendingUrls() {
+        QList<QUrl> drained;
+        drained.swap(m_pending);
+        return drained;
+    }
+    // Install (or replace) the pointer that receives future file-open events.
+    // Any URLs that arrive while the pointer is null stay queued; setting a
+    // valid pointer does not drain them automatically — the caller decides when
+    // to flush (typically via takePendingUrls) so addUrls is invoked on the
+    // GUI thread in a controlled order.
+    void setPlayer(Player *player) { m_player = player; }
+protected:
+    bool event(QEvent *e) override {
+        if (e->type() == QEvent::FileOpen) {
+            auto *fileOpen = static_cast<QFileOpenEvent *>(e);
+            const QUrl url = fileOpen->url();
+            if (url.isLocalFile() && m_player)
+                m_player->addUrls({url});
+            else if (url.isValid())
+                m_pending.append(url);
+            return true;
+        }
+        return QGuiApplication::event(e);
+    }
+private:
+    QPointer<Player> m_player;
+    QList<QUrl> m_pending;
+};
 #endif
 
 int main(int argc, char **argv) {
@@ -1696,7 +1735,11 @@ int main(int argc, char **argv) {
         qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", ",");
     if (!qEnvironmentVariableIsSet("QT_FFMPEG_ENCODING_HW_DEVICE_TYPES"))
         qputenv("QT_FFMPEG_ENCODING_HW_DEVICE_TYPES", ",");
+#ifdef Q_OS_MACOS
+    MacosApplication app(argc, argv);
+#else
     QGuiApplication app(argc, argv);
+#endif
     // Some Wayland/OpenGL integrations default to Qt's basic 16 ms animation
     // driver. Use the vsync-driven loop for the native hardware renderer.
     // Keep software rendering and explicit compatibility overrides intact.
@@ -1796,6 +1839,12 @@ int main(int argc, char **argv) {
     Theme theme(configRoot, stateRoot);
     Player player(settings);
 #ifdef Q_OS_MACOS
+    // Hook up the file-open event capture and drain anything Finder/Dock
+    // delivered before Player existed.
+    app.setPlayer(&player);
+    const auto drained = app.takePendingUrls();
+    if (!drained.isEmpty()) player.addUrls(drained);
+
     // Begin listening for additional instances now that Player is alive.
     // The callback is invoked on a fresh QLocalSocket thread; hop to the main
     // thread before touching Player or windows, and use a QPointer so a peer
