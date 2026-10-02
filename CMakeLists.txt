@@ -226,12 +226,28 @@ if(APPLE)
         if(INSTALL_NAME_TOOL_EXECUTABLE AND CODESIGN_EXECUTABLE)
             set(_bundle "$<TARGET_BUNDLE_DIR:spun>")
             # Resolve the QML root in this order: explicit SPUN_QML_ROOT env
-            # var → user-supplied cache value → the conventional Homebrew path
-            # derived from Qt6_DIR. SPUN_QML_ROOT lets people point at a Qt
-            # installed via the official installer (where the share path is
-            # <prefix>/macos/share/qt/qml rather than /opt/homebrew/share/qt/qml).
-            if(NOT SPUN_QML_ROOT AND NOT DEFINED SPUN_QML_ROOT_CACHE)
-                set(SPUN_QML_ROOT_CACHE "${Qt6_DIR}/../../../share/qt/qml" CACHE PATH "Qt QML root used by sign-macos-bundle.sh")
+            # var → user-supplied cache value → a value derived from the
+            # Qt6 install via the qtpaths binary that ships with every Qt
+            # 6 install (avoiding a hard-coded "<Qt6_DIR>/../../../share/qt/qml"
+            # path that breaks for the official installer, where the share
+            # path is <prefix>/macos/share/qt/qml). SPUN_QML_ROOT lets people
+            # override at run time without re-running CMake.
+            if(NOT DEFINED SPUN_QML_ROOT_CACHE)
+                find_program(QTPATHS_EXECUTABLE qtpaths HINTS "${Qt6_DIR}/../../../bin")
+                if(QTPATHS_EXECUTABLE)
+                    execute_process(
+                        COMMAND "${QTPATHS_EXECUTABLE}" --query QT_INSTALL_QML
+                        OUTPUT_VARIABLE SPUN_QML_ROOT_CACHE
+                        OUTPUT_STRIP_TRAILING_WHITESPACE
+                        ERROR_QUIET
+                    )
+                endif()
+                if(NOT SPUN_QML_ROOT_CACHE)
+                    # Fall back to the conventional Homebrew layout if qtpaths
+                    # was not found or did not return a usable path.
+                    set(SPUN_QML_ROOT_CACHE "${Qt6_DIR}/../../../share/qt/qml")
+                endif()
+                set(SPUN_QML_ROOT_CACHE "${SPUN_QML_ROOT_CACHE}" CACHE PATH "Qt QML root used by sign-macos-bundle.sh")
             endif()
             if(DEFINED ENV{SPUN_QML_ROOT})
                 set(_qml_root "$ENV{SPUN_QML_ROOT}")
