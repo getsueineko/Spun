@@ -233,7 +233,13 @@ if(APPLE)
             # path is <prefix>/macos/share/qt/qml). SPUN_QML_ROOT lets people
             # override at run time without re-running CMake.
             if(NOT DEFINED SPUN_QML_ROOT_CACHE)
-                find_program(QTPATHS_EXECUTABLE qtpaths HINTS "${Qt6_DIR}/../../../bin")
+                # The binary is named "qtpaths" on Homebrew, "qtpaths6"
+                # on most Linux distro packages and on the official Qt
+                # installer. Try both so a CI image that ships only the
+                # versioned binary does not silently fall through to the
+                # hard-coded Homebrew path.
+                find_program(QTPATHS_EXECUTABLE NAMES qtpaths qtpaths6
+                    HINTS "${Qt6_DIR}/../../../bin")
                 if(QTPATHS_EXECUTABLE)
                     execute_process(
                         COMMAND "${QTPATHS_EXECUTABLE}" --query QT_INSTALL_QML
@@ -241,6 +247,7 @@ if(APPLE)
                         OUTPUT_STRIP_TRAILING_WHITESPACE
                         ERROR_QUIET
                     )
+                    message(STATUS "Spun: using qtpaths at ${QTPATHS_EXECUTABLE} (QML root: ${SPUN_QML_ROOT_CACHE})")
                 endif()
                 if(NOT SPUN_QML_ROOT_CACHE)
                     # Fall back to the conventional Homebrew layout if qtpaths
@@ -255,12 +262,22 @@ if(APPLE)
                 set(_qml_root "${SPUN_QML_ROOT_CACHE}")
             endif()
             set(_entitlements "${CMAKE_SOURCE_DIR}/resources/spun.entitlements")
+            # Resolve the Qt prefix (if known) so the sign script can
+            # locate any missing transitive framework or dylib outside
+            # Homebrew. Qt6_DIR is something like <prefix>/lib/cmake/Qt6
+            # for Homebrew and <prefix>/macos/lib/cmake/Qt6 for the
+            # official installer, so go up four levels either way.
+            set(_qt_prefix_arg "")
+            if(Qt6_DIR)
+                get_filename_component(_qt_prefix_arg "${Qt6_DIR}/../../../.." ABSOLUTE)
+            endif()
             add_custom_command(TARGET spun POST_BUILD
                 COMMAND "${CMAKE_SOURCE_DIR}/scripts/sign-macos-bundle.sh"
                     "${_bundle}"
                     "${SPUN_BUNDLE_ID}"
                     "${_entitlements}"
                     "${_qml_root}"
+                    "${_qt_prefix_arg}"
                 COMMENT "Deploying QML plugins, rewriting rpaths and ad-hoc signing Spun.app"
                 VERBATIM
             )

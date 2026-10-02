@@ -14,17 +14,26 @@
 # app with "mapping process and mapped file have different Team IDs".
 set -euo pipefail
 
-bundle="${1:?usage: $0 Spun.app id entitlements qml-root}"
+bundle="${1:?usage: $0 Spun.app id entitlements qml-root [qt-prefix]}"
 id="${2:?missing bundle identifier}"
 entitlements="${3:-}"
 qml_root="${4:-}"
 
+# SPUN_QT_PREFIX (env) or the 5th positional argument lets callers point
+# the "copy missing transitive deps" step at a Qt install that lives
+# outside Homebrew — the official Qt installer puts Qt 6 under e.g.
+# ~/Qt/6.11.2/macos, and a CI image may lay out Qt under an arbitrary
+# prefix. Mirrors build-macos.sh, which already accepts the same
+# variable for the configure step.
+spun_qt_prefix="${SPUN_QT_PREFIX:-${5:-}}"
+
 install_name_tool=/usr/bin/install_name_tool
 codesign=/usr/bin/codesign
 
-# Forward declarations so the QML + "copy missing frameworks" block
-# (which runs at step 1, before step 3 defines the real bodies) can
-# call into them. The implementations below replace these stubs.
+# Forward declaration so the QML + "copy missing frameworks" block
+# (which runs at step 1, before step 3 defines the real body) can
+# rewrite freshly-copied dylibs as they land. The real implementation
+# is defined further down in step 3 and replaces this stub.
 process_bin() { :; }
 
 # Restore execute permission on every framework and plugin binary. macdeployqt
@@ -229,6 +238,13 @@ if [[ -n "$qml_root" && -d "$qml_root" ]]; then
     # Homebrew formula on disk. Without this, dyld would only fail at
     # runtime as "image not found".
     qt_search_dirs=()
+    # SPUN_QT_PREFIX (passed in from build-macos.sh, which forwards it
+    # from CMake) takes precedence: it covers the official Qt installer
+    # layout (<prefix>/lib/Qt*.framework) and CI images that install Qt
+    # somewhere other than /opt/homebrew.
+    if [[ -n "$spun_qt_prefix" && -d "$spun_qt_prefix/lib" ]]; then
+        qt_search_dirs+=("$spun_qt_prefix/lib")
+    fi
     if command -v brew >/dev/null 2>&1; then
         while read -r p; do
             [[ -d "$p/lib" ]] && qt_search_dirs+=("$p/lib")
@@ -243,141 +259,150 @@ if [[ -n "$qml_root" && -d "$qml_root" ]]; then
             qtwebchannel qtwebview 2>/dev/null || true)
     fi
     [[ -d /opt/homebrew/lib ]] && qt_search_dirs+=(/opt/homebrew/lib)
-    needed_fw=()
-    needed_dylib=()
-    while read -r bin; do
-        [[ -f "$bin" ]] || continue
-        otool -L "$bin" >/dev/null 2>&1 || continue
-        while read -r dep; do
-            case "$dep" in
-                @executable_path/../Frameworks/*.framework/Versions/A/*)
-                    fw_name="${dep#@executable_path/../Frameworks/}"
-                    fw_name="${fw_name%%.framework*}.framework"
-                    needed_fw+=("$fw_name")
-                    ;;
-                /opt/homebrew/*/Qt*.framework/Versions/A/*)
-                    fw_name="$(basename "$(dirname "$(dirname "$(dirname "$dep")")")")"
-                    needed_fw+=("$fw_name")
-                    ;;
-                @rpath/*.framework/Versions/A/*)
-                    fw_name="${dep#@rpath/}"
-                    fw_name="${fw_name%%.framework*}.framework"
-                    needed_fw+=("$fw_name")
-                    ;;
-                @executable_path/../Frameworks/*.dylib)
-                    dl_name="$(basename "$dep")"
-                    needed_dylib+=("$dl_name")
-                    ;;
-                @rpath/*.dylib)
-                    dl_name="$(basename "$dep")"
-                    needed_dylib+=("$dl_name")
-                    ;;
-                /opt/homebrew/*)
-                    # Any Homebrew path is treated as a candidate dylib or
-                    # framework dependency. macOS case patterns do not match
-                    # arbitrary path depths well, so check the basename here
-                    # against the file types we are prepared to copy.
-                    bn="$(basename "$dep")"
-                    case "$bn" in
-                        *.dylib)
-                            needed_dylib+=("$bn")
-                            ;;
-                    esac
-                    ;;
-            esac
-        done < <(otool -L "$bin" 2>/dev/null | awk '/^\t/ {print $1}')
-    done < <(find "$bundle/Contents" -type f \( -name '*.dylib' -o -perm +111 \) 2>/dev/null)
-    if (( ${#needed_fw[@]} > 0 )); then
-        while read -r fw_name; do
-            [[ -d "$bundle/Contents/Frameworks/$fw_name" && ! -L "$bundle/Contents/Frameworks/$fw_name" ]] && continue
-            src=""
-            for dir in "${qt_search_dirs[@]}"; do
-                if [[ -d "$dir/$fw_name" && ! -L "$dir/$fw_name" ]]; then
-                    src="$dir/$fw_name"
-                    break
-                fi
-            done
-            if [[ -z "$src" ]]; then
-                echo "ERROR: bundle references '$fw_name' but no Qt formula on" >&2
-                echo "       this machine ships it. Install the matching" >&2
-                echo "       brew formula (or pass SPUN_QT_PREFIX to" >&2
-                echo "       build-macos.sh for an out-of-tree Qt install)." >&2
-                exit 1
+    # scan_dependencies prints two newline-separated blocks: the unique
+    # set of framework names first, then a single "---" separator, then
+    # the unique set of dylib basenames. We use it both to discover what
+    # is missing on the first pass and to detect a fixpoint after each
+    # copy pass (a fresh framework that itself pulls in another
+    # framework or dylib is picked up by re-scanning).
+    scan_dependencies() {
+        local -a found_fw=() found_dylib=()
+        while read -r bin; do
+            [[ -f "$bin" ]] || continue
+            otool -L "$bin" >/dev/null 2>&1 || continue
+            while read -r dep; do
+                case "$dep" in
+                    @executable_path/../Frameworks/*.framework/Versions/A/*)
+                        local fw="${dep#@executable_path/../Frameworks/}"
+                        fw="${fw%%.framework*}.framework"
+                        found_fw+=("$fw")
+                        ;;
+                    /opt/homebrew/*/Qt*.framework/Versions/A/*)
+                        local fw
+                        fw="$(basename "$(dirname "$(dirname "$(dirname "$dep")")")")"
+                        found_fw+=("$fw")
+                        ;;
+                    @rpath/*.framework/Versions/A/*)
+                        local fw="${dep#@rpath/}"
+                        fw="${fw%%.framework*}.framework"
+                        found_fw+=("$fw")
+                        ;;
+                    @executable_path/../Frameworks/*.dylib)
+                        found_dylib+=("$(basename "$dep")")
+                        ;;
+                    @rpath/*.dylib)
+                        found_dylib+=("$(basename "$dep")")
+                        ;;
+                    /opt/homebrew/*)
+                        # Any Homebrew path is treated as a candidate
+                        # dylib or framework dependency. macOS case
+                        # patterns do not match arbitrary path depths
+                        # well, so check the basename here against the
+                        # file types we are prepared to copy.
+                        local bn
+                        bn="$(basename "$dep")"
+                        case "$bn" in
+                            *.framework) found_fw+=("$bn") ;;
+                            *.dylib) found_dylib+=("$bn") ;;
+                        esac
+                        ;;
+                esac
+            done < <(otool -L "$bin" 2>/dev/null | awk '/^\t/ {print $1}')
+        done < <(find "$bundle/Contents" -type f \( -name '*.dylib' -o -perm +111 \) 2>/dev/null)
+        printf '%s\n' "${found_fw[@]}" | sort -u
+        printf -- '---\n'
+        printf '%s\n' "${found_dylib[@]}" | sort -u
+    }
+    copy_framework() {
+        local fw_name="$1"
+        local src=""
+        for dir in "${qt_search_dirs[@]}"; do
+            if [[ -d "$dir/$fw_name" && ! -L "$dir/$fw_name" ]]; then
+                src="$dir/$fw_name"
+                break
             fi
-            echo "  + copying missing $fw_name from $src"
-            rm -f "$bundle/Contents/Frameworks/$fw_name"
-            if command -v rsync >/dev/null 2>&1; then
-                rsync -a "$src" "$bundle/Contents/Frameworks/"
-            else
-                cp -R "$src" "$bundle/Contents/Frameworks/"
+        done
+        if [[ -z "$src" ]]; then
+            echo "ERROR: bundle references '$fw_name' but no Qt formula on" >&2
+            echo "       this machine ships it. Install the matching" >&2
+            echo "       brew formula, or export SPUN_QT_PREFIX=<prefix>" >&2
+            echo "       (where <prefix>/lib contains the framework) and" >&2
+            echo "       re-run build-macos.sh so the env var reaches us." >&2
+            exit 1
+        fi
+        echo "  + copying missing $fw_name from $src"
+        rm -f "$bundle/Contents/Frameworks/$fw_name"
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -a "$src" "$bundle/Contents/Frameworks/"
+        else
+            cp -R "$src" "$bundle/Contents/Frameworks/"
+        fi
+        local fw_bin="$bundle/Contents/Frameworks/$fw_name/Versions/A/${fw_name%.framework}"
+        [[ -f "$fw_bin" ]] && chmod +x "$fw_bin"
+    }
+    copy_dylib() {
+        local dl_name="$1"
+        local src=""
+        for dir in "${qt_search_dirs[@]}"; do
+            # /opt/homebrew/lib is itself a directory of symlinks into
+            # /opt/homebrew/Cellar/...; following the symlink via cp
+            # produces a regular file in the bundle. Do not require
+            # the source itself to be non-symlink.
+            if [[ -f "$dir/$dl_name" ]]; then
+                src="$dir/$dl_name"
+                break
             fi
-            fw_bin="$bundle/Contents/Frameworks/$fw_name/Versions/A/${fw_name%.framework}"
-            [[ -f "$fw_bin" ]] && chmod +x "$fw_bin"
-            # Just-copied framework may in turn pull in another framework
-            # or a non-Qt dylib (libhunspell, libpcre2, etc.) that has not
-            # been copied yet. Re-scan it now so the next iteration of the
-            # dylib loop (and any framework that follows) sees the missing
-            # dependency.
-            if [[ -f "$fw_bin" ]] && otool -L "$fw_bin" >/dev/null 2>&1; then
-                while read -r dep; do
-                    case "$dep" in
-                        @executable_path/../Frameworks/*.framework/Versions/A/*)
-                            sub="${dep#@executable_path/../Frameworks/}"
-                            sub="${sub%%.framework*}.framework"
-                            needed_fw+=("$sub")
-                            ;;
-                        /opt/homebrew/*)
-                            bn="$(basename "$dep")"
-                            case "$bn" in
-                                *.framework) needed_fw+=("$bn") ;;
-                                *.dylib) needed_dylib+=("$bn") ;;
-                            esac
-                            ;;
-                        @rpath/*.framework/Versions/A/*)
-                            sub="${dep#@rpath/}"
-                            sub="${sub%%.framework*}.framework"
-                            needed_fw+=("$sub")
-                            ;;
-                        @rpath/*.dylib)
-                            needed_dylib+=("$(basename "$dep")")
-                            ;;
-                    esac
-                done < <(otool -L "$fw_bin" 2>/dev/null | awk '/^\t/ {print $1}')
+        done
+        if [[ -z "$src" ]]; then
+            echo "ERROR: bundle references '$dl_name' but no brew formula on" >&2
+            echo "       this machine ships it. Install the matching" >&2
+            echo "       library via Homebrew, or export" >&2
+            echo "       SPUN_QT_PREFIX=<prefix> pointing at a Qt install" >&2
+            echo "       whose lib/ contains it." >&2
+            exit 1
+        fi
+        echo "  + copying missing $dl_name from $src"
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -aL "$src" "$bundle/Contents/Frameworks/"
+        else
+            cp -L "$src" "$bundle/Contents/Frameworks/"
+        fi
+        chmod +x "$bundle/Contents/Frameworks/$dl_name"
+        # Rewrite this dylib's own LC_LOAD_DYLIB/LC_ID_DYLIB so it stops
+        # pointing back into Homebrew now that it lives inside Frameworks.
+        process_bin "$bundle/Contents/Frameworks/$dl_name"
+    }
+    # Outer "while something changed" loop: copy every missing framework
+    # and dylib we know about, then re-scan and repeat until the union
+    # stabilises. Without this, a framework copied in iteration N that
+    # pulls in a dylib the original scan never saw would only be caught
+    # by the step-8 unresolved-dep scan and reported as a hard error.
+    prev_marker=""
+    while :; do
+        scan_out="$(scan_dependencies)"
+        cur_fw="$(printf '%s\n' "$scan_out" | sed '/^---$/q' | sed '/^---$/d' | sed '/^$/d')"
+        cur_dl="$(printf '%s\n' "$scan_out" | sed -n '/^---$/,$p' | tail -n +2)"
+        marker="$(printf '%s\n%s\n' "$cur_fw" "$cur_dl" | sort -u | tr '\n' '|')"
+        [[ -z "$cur_fw$cur_dl" ]] && break
+        [[ "$marker" == "$prev_marker" ]] && break
+        prev_marker="$marker"
+        changed=0
+        while read -r fw; do
+            [[ -z "$fw" ]] && continue
+            if [[ ! -d "$bundle/Contents/Frameworks/$fw" || -L "$bundle/Contents/Frameworks/$fw" ]]; then
+                copy_framework "$fw"
+                changed=1
             fi
-        done < <(printf '%s\n' "${needed_fw[@]}" | sort -u)
-    fi
-    if (( ${#needed_dylib[@]} > 0 )); then
-        while read -r dl_name; do
-            [[ -f "$bundle/Contents/Frameworks/$dl_name" ]] && continue
-            src=""
-            for dir in "${qt_search_dirs[@]}"; do
-                # /opt/homebrew/lib is itself a directory of symlinks into
-                # /opt/homebrew/Cellar/...; following the symlink via cp
-                # produces a regular file in the bundle. Do not require
-                # the source itself to be non-symlink.
-                if [[ -f "$dir/$dl_name" ]]; then
-                    src="$dir/$dl_name"
-                    break
-                fi
-            done
-            if [[ -z "$src" ]]; then
-                echo "ERROR: bundle references '$dl_name' but no brew formula on" >&2
-                echo "       this machine ships it. Install the matching" >&2
-                echo "       library via Homebrew." >&2
-                exit 1
+        done <<< "$cur_fw"
+        while read -r dl; do
+            [[ -z "$dl" ]] && continue
+            if [[ ! -f "$bundle/Contents/Frameworks/$dl" ]]; then
+                copy_dylib "$dl"
+                changed=1
             fi
-            echo "  + copying missing $dl_name from $src"
-            if command -v rsync >/dev/null 2>&1; then
-                rsync -aL "$src" "$bundle/Contents/Frameworks/"
-            else
-                cp -L "$src" "$bundle/Contents/Frameworks/"
-            fi
-            chmod +x "$bundle/Contents/Frameworks/$dl_name"
-            # Rewrite this dylib's own LC_LOAD_DYLIB/LC_ID_DYLIB so it stops
-            # pointing back into Homebrew now that it lives inside Frameworks.
-            process_bin "$bundle/Contents/Frameworks/$dl_name"
-        done < <(printf '%s\n' "${needed_dylib[@]}" | sort -u)
-    fi
+        done <<< "$cur_dl"
+        [[ $changed -eq 0 ]] && break
+    done
 fi
 
 # 2. Strip absolute Homebrew rpath from the main executable. A missing rpath
@@ -493,68 +518,89 @@ while read -r bin; do process_bin "$bin"; done < <(find "$bundle/Contents/Framew
 # 4. Sign every binary inside-out, deepest first. macOS Gatekeeper refuses a
 #    bundle whose contents disagree about Team ID, so each framework and
 #    plugin must carry the same identifier as the bundle itself. We sign in
-#    leaf-to-root order: first the helper plugins in Contents/Resources/qml/
-#    and Contents/PlugIns/, then the Qt frameworks they link against, and
-#    finally the main executable. The entitlements file is applied only to
-#    the bundle root (which is what LaunchServices reads); per-binary
-#    entitlements on inner dylibs are unnecessary and slow signing down.
+#    leaf-to-root order:
 #
-#    `com.apple.security.cs.disable-library-validation` in
-#    resources/spun.entitlements is a no-op without hardened runtime
-#    (`--options runtime`), which we deliberately do not enable: the bundle
-#    is intended for direct execution on the user's machine, not for
-#    distribution outside the Mac App Store, so hardened-runtime would only
-#    complicate third-party plugin loading. The entitlement is kept as a
-#    forward-compatibility marker so flipping hardened runtime on later
-#    does not require a parallel edit.
+#      a. Helper dylibs under Contents/Resources/qml/ that are not themselves
+#         part of a .framework directory (they are leaf plugins copied
+#         alongside the QML modules they implement).
+#      b. Each *.framework under Contents/Frameworks/. We pass the framework
+#         *directory* to codesign, not the bare Versions/A/<Name> binary;
+#         codesign then knows it is signing a bundle and produces the
+#         correct _CodeSignature/CodeResources for the whole framework. The
+#         earlier round signed bare Mach-O files and that is precisely the
+#         configuration that makes codesign --strict (and LaunchServices)
+#         complain that "Foo.framework" is not a signed bundle.
+#      c. Leaf dylibs under Contents/PlugIns/ that are not .frameworks.
+#      d. The main executable (Contents/MacOS/Spun).
+#      e. The bundle root with --deep, so the seal code covers everything.
+#
+#    The entitlements file is applied only to the bundle root (which is
+#    what LaunchServices reads); per-binary entitlements on inner dylibs
+#    are unnecessary and slow signing down. disable-library-validation in
+#    resources/spun.entitlements is a forward-compatibility marker for
+#    hardened runtime; we deliberately do not enable hardened runtime
+#    here because the bundle is intended for direct execution on the
+#    developer's machine, not for distribution outside the Mac App Store.
 sign_bin() {
-    local bin="$1"
-    # Re-signing needs write permission on the file; if a previous run put
-    # the framework into a read-only state we have to drop that here.
-    [[ -w "$bin" ]] || chmod u+w "$bin"
-    "$codesign" --force --sign - --identifier "$id" "$bin"
+    local target="$1"
+    # Re-signing needs write permission; if a previous run put the bundle
+    # into a read-only state we drop that here.
+    [[ -w "$target" ]] || chmod u+w "$target"
+    "$codesign" --force --sign - --identifier "$id" "$target"
 }
-while read -r bin; do
-    [[ -f "$bin" ]] || continue
-    case "$bin" in
-        */MacOS/*) ;;  # sign the main executable last so its hash is stable
-        *) sign_bin "$bin" ;;
+# 4a. Helper dylibs under Contents/Resources/qml/ that are not inside a
+#     .framework directory. They are leaf plugins the QML engine loads
+#     directly from the qmldir's "plugin <name>" entry.
+while read -r dylib; do
+    [[ -f "$dylib" ]] || continue
+    case "$dylib" in
+        *.framework/*) ;;  # handled by the framework sign pass below
+        *) sign_bin "$dylib" ;;
     esac
 done < <(find "$bundle/Contents/Resources/qml" -type f -name '*.dylib' 2>/dev/null)
-while read -r bin; do
-    [[ -f "$bin" ]] || continue
-    case "$bin" in
-        */MacOS/*) ;;
-        *) sign_bin "$bin" ;;
+# 4b. Each *.framework under Contents/Frameworks/. Pass the framework
+#     directory itself, not the inner Versions/A/<Name> binary, so
+#     codesign produces a valid bundle signature for the whole framework.
+while read -r fw_dir; do
+    [[ -d "$fw_dir" ]] || continue
+    # Drop any leftover _CodeSignature from a previous (failed) run so
+    # codesign does not try to merge two ad-hoc seals with mismatching
+    # identifiers.
+    rm -rf "$fw_dir/_CodeSignature"
+    sign_bin "$fw_dir"
+done < <(find "$bundle/Contents/Frameworks" -mindepth 1 -maxdepth 1 -type d -name '*.framework' 2>/dev/null)
+# 4c. PlugIn dylibs that are not .frameworks.
+while read -r dylib; do
+    [[ -f "$dylib" ]] || continue
+    case "$dylib" in
+        *.framework/*) ;;
+        *) sign_bin "$dylib" ;;
     esac
-done < <(find "$bundle/Contents/PlugIns" -type f \( -name '*.dylib' -o -perm +111 \) 2>/dev/null)
-while read -r bin; do
-    [[ -f "$bin" ]] || continue
-    case "$bin" in
-        */MacOS/*) ;;
-        *) sign_bin "$bin" ;;
-    esac
-done < <(find "$bundle/Contents/Frameworks" -type f \( -name '*.dylib' -o -perm +111 \) 2>/dev/null)
+done < <(find "$bundle/Contents/PlugIns" -type f -name '*.dylib' 2>/dev/null)
+# 4d. The main executable.
 sign_bin "$bundle/Contents/MacOS/Spun"
 
 # 5. Ad-hoc sign the bundle itself, attaching the entitlements so macOS lets
-#    it load the unsigned third-party libraries we copied in.
+#    it load the unsigned third-party libraries we copied in. --deep walks
+#    every signed sub-bundle we put in place above and confirms the chain
+#    is consistent before applying the bundle seal.
 entitlements_args=()
 if [[ -n "$entitlements" && -f "$entitlements" ]]; then
     entitlements_args=(--entitlements "$entitlements")
 fi
-"$codesign" --force --sign - --identifier "$id" \
+"$codesign" --force --deep --sign - --identifier "$id" \
     "${entitlements_args[@]}" "$bundle"
 
-# 6. Verify the bundle. We do not pass --strict because the ad-hoc
-#    signature codesign --strict produces on bundles whose inner binaries
-#    were originally signed by macdeployqt is known to mis-report
-#    "image not found" when one of the inner framework binaries was
-#    re-signed during this run; the bundle still launches correctly and
-#    the basic --verify output below already shows "valid on disk" /
-#    "satisfies Designated Requirement" when the seal is intact. The
-#    homebrew + unresolved-dep scans above catch real problems.
-"$codesign" --verify --verbose=2 "$bundle"
+# 6. Verify the bundle. --deep + --strict is the only invocation that
+#    actually validates the nested bundle hierarchy (inner .frameworks
+#    re-sealed with the same identifier, no orphaned _CodeSignature
+#    sidecars, every LC_LOAD_DYLIB still resolves to a file that exists
+#    inside the bundle). A bare "valid on disk" without --strict is not
+#    enough to catch a misconfigured framework, so we keep --strict and
+#    abort on any failure: a bundle that fails --strict will not launch
+#    reliably, and silencing the failure here only moves the problem to
+#    the user.
+"$codesign" --verify --deep --strict --verbose=2 "$bundle"
 
 # 7. Re-scan every binary in the bundle for stray /opt/homebrew references.
 #    A surviving LC_LOAD_DYLIB or LC_RPATH to /opt/homebrew would either
@@ -577,20 +623,6 @@ if (( ${#stale_refs[@]} > 0 )); then
     done
     exit 1
 fi
-
-# 6. Verify that the QML modules Spun actually imports are present in the
-#    bundle. macdeployqt crashes on Spun's qml/ tree and we work around it,
-#    so without this check a silent failure of the workaround would manifest
-#    only at runtime as "module QtQuick.Dialogs is not installed".
-for module in QtQuick QtQuick/Controls QtQuick/Dialogs QtQuick/Layouts QtQuick/Window; do
-    if [[ ! -f "$bundle/Contents/Resources/qml/$module/qmldir" ]]; then
-        echo "ERROR: required QML module $module is missing from the bundle." >&2
-        echo "       (expected $bundle/Contents/Resources/qml/$module/qmldir)" >&2
-        echo "       This usually means qml_root (\"$qml_root\") did not contain" >&2
-        echo "       Qt 6 modules, or the cp/rsync copy failed." >&2
-        exit 1
-    fi
-done
 # Quick3D is only required when SPUN_ENABLE_3D was set at build time. We
 # detect it by the presence of the QtQuick3D private plugin dylib in the
 # bundle; if it's there, the qmldir should be too.
@@ -602,7 +634,7 @@ if [[ -f "$bundle/Contents/PlugIns/quick/libqtquick3dquickplugin.dylib" \
     fi
 fi
 
-# 7. Resolve every non-system LC_LOAD_DYLIB inside the bundle to an existing
+# 8. Resolve every non-system LC_LOAD_DYLIB inside the bundle to an existing
 #    file. A dangling @executable_path/... or @rpath/... reference would
 #    only surface at runtime as "image not found", and macOS dialogs do not
 #    tell the developer which Mach-O owned the broken reference. Walk each
@@ -617,6 +649,14 @@ while read -r bin; do
     # command.
     exec_root="$bundle/Contents/MacOS"
     loader_root="$(dirname "$bin")"
+    # Pull the LC_RPATH list once per binary; @rpath lookups use it.
+    rpaths=()
+    while read -r rp; do
+        [[ -z "$rp" ]] && continue
+        rpaths+=("$rp")
+    done < <(otool -l "$bin" 2>/dev/null \
+        | awk '/LC_RPATH/{getline; getline; sub(/^[[:space:]]*path /,""); sub(/[[:space:]].*$/, ""); print}' \
+        || true)
     while read -r dep; do
         case "$dep" in
             /usr/lib/*|/System/Library/*) continue ;;
@@ -631,17 +671,39 @@ while read -r bin; do
                 tail="${dep#@loader_path/}"
                 resolved="$loader_root/$tail"
                 ;;
+            @rpath/*)
+                # Walk the LC_RPATH list in declaration order; dyld does
+                # the same and stops at the first hit, so we have to as
+                # well or we would mis-report a reference that resolves
+                # through the second rpath entry.
+                tail="${dep#@rpath/}"
+                for rp in "${rpaths[@]}"; do
+                    case "$rp" in
+                        @executable_path/*)
+                            candidate="$exec_root/${rp#@executable_path/}/$tail"
+                            ;;
+                        @loader_path/*)
+                            candidate="$loader_root/${rp#@loader_path/}/$tail"
+                            ;;
+                        /*)
+                            candidate="$rp/$tail"
+                            ;;
+                        *)
+                            continue
+                            ;;
+                    esac
+                    if [[ -e "$candidate" ]]; then
+                        resolved="$candidate"
+                        break
+                    fi
+                done
+                ;;
         esac
-        # @rpath is resolved via LC_RPATH, which we already vetted in step 5
-        # (delete_rpath kept only @executable_path/../Frameworks, so @rpath
-        # lookups land in the bundle's Frameworks/). We do not re-check them
-        # here because the resolution depends on the rpath table, not the
-        # install name alone.
-        if [[ -n "$resolved" && ! -e "$resolved" ]]; then
+        if [[ -z "$resolved" || ! -e "$resolved" ]]; then
             unresolved+=("$bin -> $dep")
         fi
     done < <(otool -L "$bin" 2>/dev/null | awk '/^\t/ && $1 !~ /^\/usr\/lib/ && $1 !~ /^\/System\/Library/ {print $1}')
-done < <(find "$bundle/Contents" -type f -perm +111 2>/dev/null)
+done < <(find "$bundle/Contents" -type f \( -name '*.dylib' -o -perm +111 \) 2>/dev/null)
 if (( ${#unresolved[@]} > 0 )); then
     echo "ERROR: bundle has unresolved install names after signing:" >&2
     for ref in "${unresolved[@]}"; do
@@ -650,7 +712,7 @@ if (( ${#unresolved[@]} > 0 )); then
     exit 1
 fi
 
-# 6. Verify that the QML modules Spun actually imports are present in the
+# 9. Verify that the QML modules Spun actually imports are present in the
 #    bundle. macdeployqt crashes on Spun's qml/ tree and we work around it,
 #    so without this check a silent failure of the workaround would manifest
 #    only at runtime as "module QtQuick.Dialogs is not installed".
