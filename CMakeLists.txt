@@ -264,12 +264,15 @@ if(APPLE)
             set(_entitlements "${CMAKE_SOURCE_DIR}/resources/spun.entitlements")
             # Resolve the Qt prefix (if known) so the sign script can
             # locate any missing transitive framework or dylib outside
-            # Homebrew. Qt6_DIR is something like <prefix>/lib/cmake/Qt6
-            # for Homebrew and <prefix>/macos/lib/cmake/Qt6 for the
-            # official installer, so go up four levels either way.
+            # Homebrew. The script looks in "<prefix>/lib", and Qt6_DIR is
+            # "<prefix>/lib/cmake/Qt6" in every layout (Homebrew:
+            # /opt/homebrew, official installer: ~/Qt/<ver>/macos), so the
+            # prefix is exactly three levels up. Four levels would land on
+            # /opt or ~/Qt/<ver>, where "<prefix>/lib" does not exist and the
+            # script skips it without a word.
             set(_qt_prefix_arg "")
             if(Qt6_DIR)
-                get_filename_component(_qt_prefix_arg "${Qt6_DIR}/../../../.." ABSOLUTE)
+                get_filename_component(_qt_prefix_arg "${Qt6_DIR}/../../.." ABSOLUTE)
             endif()
             add_custom_command(TARGET spun POST_BUILD
                 COMMAND "${CMAKE_SOURCE_DIR}/scripts/sign-macos-bundle.sh"
