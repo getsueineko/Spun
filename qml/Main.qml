@@ -508,7 +508,7 @@ ApplicationWindow {
     }
     property bool queueOpen: false
     property bool helpOpen: false
-    readonly property bool menuOpen: !!(serverBrowser.item && serverBrowser.item.actionsOpen) || !!(youtubeBrowser.item && youtubeBrowser.item.actionsOpen) || !!(tx6Controls && tx6Controls.popupOpen) || artworkPopup.visible || helpOpen || recoveryPopup.visible || quickJump.visible || savedQueuePicker.visible || cleanupPopup.visible || qualityPopup.visible || savedQueueMenu.visible || saveQueuePopup.visible || deleteQueuePopup.visible || fontPicker.shown || fontPicker.opening || menu.visible || preferences.visible || crossfadeMenu.visible || queueMenu.visible || songMenu.visible || musicBrowser.actionsOpen
+    readonly property bool menuOpen: !!(aboutPopup && aboutPopup.visible) || !!(serverBrowser.item && serverBrowser.item.actionsOpen) || !!(youtubeBrowser.item && youtubeBrowser.item.actionsOpen) || !!(tx6Controls && tx6Controls.popupOpen) || artworkPopup.visible || helpOpen || recoveryPopup.visible || quickJump.visible || savedQueuePicker.visible || cleanupPopup.visible || qualityPopup.visible || savedQueueMenu.visible || saveQueuePopup.visible || deleteQueuePopup.visible || fontPicker.shown || fontPicker.opening || menu.visible || preferences.visible || crossfadeMenu.visible || queueMenu.visible || songMenu.visible || musicBrowser.actionsOpen
     property bool backgroundBlur: player.backgroundBlur && platformNative.supportsBlur
     onBackgroundBlurChanged: { platformNative.effects(root, backgroundBlur); Qt.callLater(updateMask) }
     property bool muted: false
@@ -581,8 +581,9 @@ ApplicationWindow {
         songMenu.close(); musicBrowser.closeActions(); menu.open()
     }
     function showAboutDialog() {
-        // The native macOS App menu owns the About item. Show it as a quiet
-        // overlay rather than a modal popup so the menu bar can keep focus.
+        // The native macOS App menu owns the About item. Like openSettings(),
+        // the dialog needs the full player window: it does not fit in mini mode.
+        if (miniMode) { player.miniMode = false; Qt.callLater(showAboutDialog); return }
         if (!aboutPopup) aboutPopup = aboutPopupComponent.createObject(root)
         if (aboutPopup) aboutPopup.open()
     }
@@ -591,15 +592,30 @@ ApplicationWindow {
         Popup {
             id: popup
             objectName: "aboutDialog"
-            modal: true; focus: true; padding: 24
-            x: (root.width - width) / 2; y: (root.height - height) / 2
+            // Same setup as the other modal dialogs in this file. Three things
+            // were wrong before:
+            //  * it was missing from menuOpen, so the window mask stayed the
+            //    shaped region (disc + bars + panel) and everything the dialog
+            //    drew outside it was clipped, leaving a gap and cut-off text;
+            //  * the default dim scrim painted a translucent rectangle over
+            //    every rectangular mask region, including the transparent
+            //    corners around rounded items (the "artifacts");
+            //  * it was centred on root.width, i.e. on the whole window
+            //    including the side panel and ignoring uiScale, so with the
+            //    queue open it straddled the gap between player and panel.
+            // Centre on the player column in the logical (unscaled) scene.
+            parent: Overlay.overlay
+            popupType: Popup.Item
+            modal: true; dim: false; focus: true; padding: 24
+            x: (root.playerWidth - width) / 2; y: (root.layoutHeight - height) / 2
             width: 360
             background: Rectangle { color: root.surface; radius: SpunStyle.dialogRadius; border.width: 1; border.color: root.hairline }
             contentItem: ColumnLayout {
                 spacing: 12
                 SpunText { text: "Spun"; font.pixelSize: SpunStyle.title; font.weight: Font.Medium; color: root.ink; Layout.alignment: Qt.AlignHCenter }
                 SpunText {
-                    Layout.alignment: Qt.AlignHCenter
+                    Layout.alignment: Qt.AlignHCenter; Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WrapAnywhere
                     text: "Version " + (typeof spunBuildDesc !== "undefined" ? spunBuildDesc : Qt.application.version)
                     color: root.mutedInk; font.pixelSize: SpunStyle.body
                 }
