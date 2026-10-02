@@ -822,7 +822,7 @@ ApplicationWindow {
         opacity: root.chromeHidden ? 0 : 1
         Behavior on opacity { NumberAnimation { duration: SpunStyle.feedback; easing.type: Easing.BezierSpline; easing.bezierCurve: SpunStyle.effectsCurve } }
         visible: !root.miniMode
-        x: (root.playerWidth - width) / 2; y: 13; width: platformNative.hyprland ? 504 : 512; height: 48; radius: 24
+        x: (root.playerWidth - width) / 2; y: 13; width: (platformNative.hyprland ? 504 : 512) - (5 - sourceTabs.sources.length) * tabWidth; height: 48; radius: 24
         readonly property real tabWidth: platformNative.hyprland ? 80 : 64
         color: root.surface
         border.width: 0
@@ -903,13 +903,13 @@ ApplicationWindow {
         }
         IconButton {
             objectName: "queueButton"
-            x: 60 + 5 * badge.tabWidth; y: 4; glyphName: "queue"; tip: "Queue · Ctrl+L"
+            x: 60 + sourceTabs.sources.length * badge.tabWidth; y: 4; glyphName: "queue"; tip: "Queue · Ctrl+L"
             selected: root.queueOpen; fill: root.queueOpen ? root.inset : "transparent"
             ink: root.queueOpen ? root.accent : root.ink; hoverFill: root.hoverFill
             onClicked: root.queueOpen = !root.queueOpen
         }
-        IconButton { visible: !platformNative.hyprland; x: 104 + 5 * badge.tabWidth; y: 4; glyphName: "minus"; tip: "Minimize"; ink: root.mutedInk; hoverFill: root.hoverFill; onClicked: root.showMinimized() }
-        IconButton { visible: !platformNative.hyprland; x: 148 + 5 * badge.tabWidth; y: 4; glyphName: "close"; tip: "Close Spun"; ink: root.mutedInk; hoverFill: root.hoverFill; onClicked: Qt.quit() }
+        IconButton { visible: !platformNative.hyprland; x: 104 + sourceTabs.sources.length * badge.tabWidth; y: 4; glyphName: "minus"; tip: "Minimize"; ink: root.mutedInk; hoverFill: root.hoverFill; onClicked: root.showMinimized() }
+        IconButton { visible: !platformNative.hyprland; x: 148 + sourceTabs.sources.length * badge.tabWidth; y: 4; glyphName: "close"; tip: "Close Spun"; ink: root.mutedInk; hoverFill: root.hoverFill; onClicked: Qt.quit() }
     }
 
     Item {
