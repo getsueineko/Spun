@@ -155,8 +155,15 @@ ApplicationWindow {
     // such assignment explicitly with `if (ciderSupported)`. Just
     // turning useCider false here is not enough; the next imperative
     // assignment would override it.
-    readonly property bool ciderSupported: !testMode && Qt.platform.os !== "osx"
-    property bool useCider: ciderSupported && root.ciderService.available
+    //
+    // testMode must NOT switch this off: the self-tests (src/main.cpp) click
+    // and focus the Cider tab on every platform. They never get a live Cider
+    // anyway, because useCider below is false in testMode.
+    readonly property bool ciderSupported: testMode || Qt.platform.os !== "osx"
+    property bool useCider: !testMode && ciderSupported && root.ciderService.available
+    // Name of the active source tab. Tabs are identified by name, not by
+    // position, because the Cider tab is absent from the list on macOS.
+    readonly property string activeSource: useSubsonic ? "Subsonic" : useJellyfin ? "Jellyfin" : useYoutube ? "YouTube" : useCider ? "Cider" : "Local"
     property var ciderService: cider
     property var listeningService: listening
     property var actionService: musicActions
@@ -632,7 +639,7 @@ ApplicationWindow {
     onHelpOpenChanged: { if (helpOpen && miniMode) player.miniMode = false; Qt.callLater(updateMask) }
     onMenuOpenChanged: Qt.callLater(updateMask)
     onWidthChanged: Qt.callLater(updateMask)
-    Component.onCompleted: { if (ciderSupported && player.ciderAutoStart) { useCider = true; root.ciderService.ensureRunning() }; updateMask(); platformNative.place(root); Qt.callLater(presentDisc); syncLyrics() }
+    Component.onCompleted: { if (!testMode && ciderSupported && player.ciderAutoStart) { useCider = true; root.ciderService.ensureRunning() }; updateMask(); platformNative.place(root); Qt.callLater(presentDisc); syncLyrics() }
     onClosing: player.save()
     // macOS native application menu bar: route its choices through the same
     // public methods the QML buttons use. macosMenuBar is always registered
@@ -822,15 +829,15 @@ ApplicationWindow {
         MouseArea { anchors.fill: parent; onPressed: root.startSystemMove() }
         Rectangle {
             objectName: "sourceIndicator"
-            // Badge position depends on the active source; ciderSupported
-            // removes the Cider slot, so the per-source offset is shifted
-            // by one when cider is hidden.
-            SpunSpring { id: sourceMotion; targetValue: 56 + badge.tabWidth * (root.useSubsonic ? sourceTabItems.count - 1 : root.useJellyfin ? sourceTabItems.count - 2 : root.useYoutube ? sourceTabItems.count - 3 : root.useCider ? 1 : 0) }
+            SpunSpring { id: sourceMotion; targetValue: 56 + badge.tabWidth * Math.max(0, sourceTabs.sources.indexOf(root.activeSource)) }
             x: sourceMotion.value; y: 6; width: badge.tabWidth; height: 36; radius: 18
             color: root.inset
         }
         Row {
             id: sourceTabs
+            readonly property var sources: root.ciderSupported
+                ? ["Local", "Cider", "YouTube", "Jellyfin", "Subsonic"]
+                : ["Local", "YouTube", "Jellyfin", "Subsonic"]
             function focusTab(index) {
                 const button = sourceTabItems.itemAt(Math.max(0, Math.min(sourceTabItems.count - 1, index)))
                 if (button) button.forceActiveFocus(Qt.TabFocusReason)
@@ -844,12 +851,10 @@ ApplicationWindow {
                 // Subsonic keep their old indices). The dynamic model also
                 // keeps the focusTab() Math.min bound correct without any
                 // branching at the call sites.
-                model: root.ciderSupported
-                    ? ["Local", "Cider", "YouTube", "Jellyfin", "Subsonic"]
-                    : ["Local", "YouTube", "Jellyfin", "Subsonic"]
+                model: sourceTabs.sources
                 AbstractButton {
                     id: sourceTab
-                    objectName: index === 0 ? "localSourceButton" : index === 1 ? "ciderSourceButton" : index === 2 ? "youtubeSourceButton" : index === 3 ? "jellyfinSourceButton" : "subsonicSourceButton"
+                    objectName: modelData.toLowerCase() + "SourceButton"
                     required property string modelData
                     required property int index
                     width: badge.tabWidth; height: 36
@@ -857,7 +862,7 @@ ApplicationWindow {
                     hoverEnabled: true
                     Accessible.name: modelData
                     Accessible.role: Accessible.PageTab
-                    Accessible.selectable: true; Accessible.selected: (root.useSubsonic ? 4 : root.useJellyfin ? 3 : root.useYoutube ? 2 : root.useCider ? 1 : 0) === index
+                    Accessible.selectable: true; Accessible.selected: modelData === root.activeSource
                     Keys.onShortcutOverride: event => {
                         if (event.modifiers === Qt.NoModifier && [Qt.Key_Left, Qt.Key_Right, Qt.Key_Home, Qt.Key_End].includes(event.key)) event.accepted = true
                     }
@@ -877,8 +882,16 @@ ApplicationWindow {
                         SpunStateLayer { anchors.fill: parent; radius: parent.radius; color: root.ink; pressed: sourceTab.down; focused: sourceTab.visualFocus; hovered: sourceTab.hovered }
                         border.width: sourceTab.visualFocus ? 2 : 0; border.color: root.accent
                     }
-                    contentItem: SpunText { text: parent.modelData; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: ((root.useSubsonic ? sourceTabItems.count - 1 : root.useJellyfin ? sourceTabItems.count - 2 : root.useYoutube ? sourceTabItems.count - 3 : root.useCider ? 1 : 0) === parent.index) ? root.accent : root.mutedInk; font.pixelSize: SpunStyle.body; font.weight: Font.Medium }
-                    onClicked: { if(index===0)root.useLocal(); else if(index===1 && root.ciderSupported){root.useYoutube=false;root.useCider=true;if(player.ciderAutoStart)root.ciderService.ensureRunning()} else if(index===sourceTabItems.count-3){root.useYoutube=true;root.libraryOpen=true} else if(index===sourceTabItems.count-2){root.useJellyfin=true;root.libraryOpen=true} else {root.useSubsonic=true;root.libraryOpen=true} }
+                    contentItem: SpunText { text: parent.modelData; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: parent.modelData === root.activeSource ? root.accent : root.mutedInk; font.pixelSize: SpunStyle.body; font.weight: Font.Medium }
+                    onClicked: {
+                        switch (modelData) {
+                        case "Local": root.useLocal(); break
+                        case "Cider": if (root.ciderSupported) { root.useYoutube = false; root.useCider = true; if (player.ciderAutoStart) root.ciderService.ensureRunning() } break
+                        case "YouTube": root.useYoutube = true; root.libraryOpen = true; break
+                        case "Jellyfin": root.useJellyfin = true; root.libraryOpen = true; break
+                        default: root.useSubsonic = true; root.libraryOpen = true
+                        }
+                    }
                 }
             }
         }
