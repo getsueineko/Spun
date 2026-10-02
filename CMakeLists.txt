@@ -121,7 +121,7 @@ if(TARGET Qt6::Quick3D AND SPUN_ENABLE_3D)
     set(SPUN_3D_QML qml/Player3D.qml qml/Recorder3D.qml qml/Tx6_3D.qml qml/Tx6Cable3D.qml qml/Vinyl3D.qml qml/Cassette3D.qml qml/Cd3D.qml)
 endif()
 set(SPUN_DEMO_FILE "${CMAKE_CURRENT_SOURCE_DIR}/assets/First-Light.flac" CACHE FILEPATH "Installed or source demo audio file")
-target_compile_definitions(spun_core PUBLIC SPUN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" SPUN_DEMO_FILE="${SPUN_DEMO_FILE}")
+target_compile_definitions(spun_core PUBLIC SPUN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" SPUN_DEMO_FILE="${SPUN_DEMO_FILE}" SPUN_BUNDLE_ID="${SPUN_BUNDLE_ID}")
 target_compile_options(spun_core PRIVATE -Wall -Wextra -Wpedantic)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # Keep Release code compact without changing floating-point semantics or

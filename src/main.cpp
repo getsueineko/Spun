@@ -1611,6 +1611,11 @@ static int exercise(Player &player, Theme &theme, Lyrics &lyrics, QQuickWindow *
 // connect, forward their positional arguments as URLs, and exit. The server is
 // created after parsing so positional arguments are available, but it stores a
 // QPointer to Player and only forwards when Player is still alive.
+//
+// We deliberately bind to the single SPUN_BUNDLE_ID macro rather than re-typing
+// the identifier twice: this keeps Info.plist, MACOSX_BUNDLE_GUI_IDENTIFIER and
+// the QLocalServer name in lock-step, so renaming the bundle later only
+// requires editing CMakeLists.txt.
 #ifdef Q_OS_MACOS
 class MacosSingleInstance : public QObject {
     Q_OBJECT
@@ -1626,14 +1631,24 @@ public:
         socket.connectToServer(m_socketName);
         if (!socket.waitForConnected(200))
             return false;
+        // startTransaction/commitTransaction wraps the payload in a length
+        // prefix so the receiver can tell where the message ends even when
+        // the kernel delivered it across multiple read()s. Without it, a
+        // socket that disconnects before waitForBytesWritten returns can
+        // leave the peer half-way through the deserialisation and trigger
+        // a spurious "Ok" status with an empty url list.
         QByteArray payload;
         QDataStream stream(&payload, QIODevice::WriteOnly);
         stream.setVersion(QDataStream::Qt_6_0);
+        stream.startTransaction();
         stream << urls;
+        stream.commitTransaction();
         socket.write(payload);
-        socket.flush();
-        socket.waitForBytesWritten(200);
+        if (!socket.waitForBytesWritten(200))
+            return false;
         socket.disconnectFromServer();
+        if (socket.state() != QLocalSocket::UnconnectedState)
+            socket.waitForDisconnected(200);
         return true;
     }
     // Start listening. If the socket file is stale (no peer but the file exists
@@ -1652,14 +1667,17 @@ public:
         connect(m_server, &QLocalServer::newConnection, this, [this, onMessage] {
             while (auto *socket = m_server->nextPendingConnection()) {
                 connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
-                if (!socket->bytesAvailable())
-                    socket->waitForReadyRead(200);
+                // Use startTransaction on the read side too, so the stream
+                // either deserialises a complete message or fails cleanly
+                // when the peer hangs up before flushing.
                 QDataStream stream(socket);
                 stream.setVersion(QDataStream::Qt_6_0);
                 QStringList urls;
+                stream.startTransaction();
                 stream >> urls;
-                if (stream.status() == QDataStream::Ok)
-                    onMessage(urls);
+                if (!stream.commitTransaction())
+                    continue;
+                onMessage(urls);
             }
         });
         return true;
@@ -1812,7 +1830,7 @@ int main(int argc, char **argv) {
         // macOS has no D-Bus session bus; use a per-bundle QLocalServer named
         // after the reverse-DNS identifier. A peer connected here means the
         // first instance is already listening, so forward URLs and exit.
-        MacosSingleInstance peer(QStringLiteral("com.yappologistic.spun.spun"));
+        MacosSingleInstance peer(QStringLiteral(SPUN_BUNDLE_ID));
         QStringList urls;
         for (const auto &arg : parser.positionalArguments())
             urls.append(QUrl::fromUserInput(arg, QDir::currentPath(), QUrl::AssumeLocalFile).toString());
@@ -1859,12 +1877,20 @@ int main(int argc, char **argv) {
     if (!drained.isEmpty()) player.addUrls(drained);
 
     // Begin listening for additional instances now that Player is alive.
-    // The callback is invoked on a fresh QLocalSocket thread; hop to the main
-    // thread before touching Player or windows, and use a QPointer so a peer
-    // that connects during shutdown cannot dereference a destroyed Player.
+    // The callback fires on the QLocalServer thread that handled the accept();
+    // hop to the main thread before touching Player or windows, and use a
+    // QPointer so a peer that connects during shutdown cannot dereference a
+    // destroyed Player.
     if (!test && !parser.isSet("config") && !parser.isSet("isolated")) {
-        auto *server = new MacosSingleInstance(QStringLiteral("com.yappologistic.spun.spun"), &app);
+        auto *server = new MacosSingleInstance(QStringLiteral(SPUN_BUNDLE_ID), &app);
         QPointer<Player> playerPtr(&player);
+        // Resolve the root window lazily inside the queued callback. The
+        // engine is constructed further down in main(); by the time a peer
+        // connects, it has already loaded Main.qml, so the first object in
+        // its rootObjects() list is the main window we want to raise.
+        // Comparing against window title() and walking topLevelWindows() is
+        // brittle: on macOS the main window object is fixed at engine load
+        // time and other windows (about/help dialogs) come and go.
         if (!server->listen([playerPtr](const QStringList &urls) {
                 QPointer<Player> p = playerPtr;
                 QMetaObject::invokeMethod(qApp, [p, urls] {
@@ -1875,12 +1901,18 @@ int main(int argc, char **argv) {
                         for (const auto &u : urls) queueUrls.append(QUrl(u));
                         p->addUrls(queueUrls);
                     }
-                    for (auto *window : QGuiApplication::topLevelWindows())
-                        if (window->title() == QLatin1String("Spun")) { window->showNormal(); window->raise(); window->requestActivate(); }
+                    auto engines = qApp->findChildren<QQmlApplicationEngine *>();
+                    for (auto *engine : engines) {
+                        if (auto *window = qobject_cast<QQuickWindow *>(engine->rootObjects().value(0))) {
+                            window->showNormal();
+                            window->raise();
+                            window->requestActivate();
+                        }
+                    }
                 }, Qt::QueuedConnection);
             })) {
-            std::cerr << "Failed to start single-instance server on com.yappologistic.spun.spun; "
-                      << "additional invocations will start their own process." << std::endl;
+            std::cerr << "Failed to start single-instance server on " << SPUN_BUNDLE_ID
+                      << "; additional invocations will start their own process." << std::endl;
         }
     }
 #endif
