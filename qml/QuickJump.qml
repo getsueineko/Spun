@@ -66,12 +66,12 @@ Popup {
             if (!app.miniMode) app.revealQueueTrack(row.index)
         } else if (row.kind === "bookmark") {
             if (app.actionService.busy || app.ciderService.controlBusy || app.listeningService.busy) { notice = "Cider is busy. Try again when it finishes."; return }
-            close(); app.useCider = true; app.listeningService.playBookmark(row.key)
+            close(); if (app.ciderSupported) { app.useCider = true; app.listeningService.playBookmark(row.key) }
         } else if (row.kind === "recovery") {
-            close(); app.useCider = true; app.showRecovery()
+            close(); if (app.ciderSupported) { app.useCider = true; app.showRecovery() }
         } else {
             const kind = row.kind, key = row.key
-            close(); app.useCider = true; app.libraryOpen = true; service.openQuickTarget(kind, key)
+            close(); if (app.ciderSupported) { app.useCider = true; app.libraryOpen = true; service.openQuickTarget(kind, key) }
         }
     }
     onClosed: { waitingForQueue = false; targets = []; query = ""; notice = "" }

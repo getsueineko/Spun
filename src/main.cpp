@@ -1624,6 +1624,14 @@ public:
         : QObject(parent), m_server(new QLocalServer(this)), m_socketName(socketName) {
         m_server->setSocketOptions(QLocalServer::UserAccessOption);
     }
+    // Register a shared holder that the caller will populate with the main
+    // QWindow after engine.load finishes. We capture it in the listen()
+    // callback by copy, so the window pointer is reachable from any peer
+    // connection regardless of when the connection arrives relative to
+    // engine setup.
+    using WindowHolder = std::shared_ptr<QPointer<QWindow>>;
+    void setMainWindowHolder(WindowHolder holder) { m_mainWindow = std::move(holder); }
+    WindowHolder mainWindowHolder() const { return m_mainWindow; }
     // Try to forward the given file URLs to an already-running instance.
     // Returns true if a peer accepted the connection (caller should exit 0).
     bool forward(const QStringList &urls) {
@@ -1631,18 +1639,15 @@ public:
         socket.connectToServer(m_socketName);
         if (!socket.waitForConnected(200))
             return false;
-        // startTransaction/commitTransaction wraps the payload in a length
-        // prefix so the receiver can tell where the message ends even when
-        // the kernel delivered it across multiple read()s. Without it, a
-        // socket that disconnects before waitForBytesWritten returns can
-        // leave the peer half-way through the deserialisation and trigger
-        // a spurious "Ok" status with an empty url list.
+        // QStringList is self-delimiting (each string carries its own length
+        // prefix), so we do not need startTransaction/commitTransaction on
+        // the write side — those only matter on the read side, where they
+        // tell QDataStream "do not consume past the end of one logical
+        // message if the kernel delivered several in a single chunk".
         QByteArray payload;
         QDataStream stream(&payload, QIODevice::WriteOnly);
         stream.setVersion(QDataStream::Qt_6_0);
-        stream.startTransaction();
         stream << urls;
-        stream.commitTransaction();
         socket.write(payload);
         if (!socket.waitForBytesWritten(200))
             return false;
@@ -1664,20 +1669,34 @@ public:
             if (!tryListen())
                 return false;
         }
+        // newConnection is delivered on the thread that owns the QLocalServer
+        // (the main thread, in our case), so the handler runs there too —
+        // there is no need to hop with QMetaObject::invokeMethod before
+        // touching Player or windows.
         connect(m_server, &QLocalServer::newConnection, this, [this, onMessage] {
             while (auto *socket = m_server->nextPendingConnection()) {
                 connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
-                // Use startTransaction on the read side too, so the stream
-                // either deserialises a complete message or fails cleanly
-                // when the peer hangs up before flushing.
-                QDataStream stream(socket);
-                stream.setVersion(QDataStream::Qt_6_0);
-                QStringList urls;
-                stream.startTransaction();
-                stream >> urls;
-                if (!stream.commitTransaction())
-                    continue;
-                onMessage(urls);
+                // The sender typically has not finished write()ing by the
+                // time newConnection fires; we must wait for readyRead
+                // before attempting to deserialise, otherwise commit-
+                // Transaction() returns false and the message is silently
+                // dropped. We also fire once if some bytes happen to be
+                // already buffered, which happens for messages that arrive
+                // fully written before the accept() returns.
+                auto read = [socket, onMessage] {
+                    QDataStream stream(socket);
+                    stream.setVersion(QDataStream::Qt_6_0);
+                    QStringList urls;
+                    stream.startTransaction();
+                    stream >> urls;
+                    if (!stream.commitTransaction())
+                        return; // incomplete — wait for the next readyRead
+                    onMessage(urls);
+                    socket->disconnectFromServer();
+                };
+                connect(socket, &QLocalSocket::readyRead, socket, read);
+                if (socket->bytesAvailable())
+                    read();
             }
         });
         return true;
@@ -1685,6 +1704,7 @@ public:
 private:
     QLocalServer *m_server;
     QString m_socketName;
+    WindowHolder m_mainWindow;
 };
 
 // QGuiApplication does not deliver QFileOpenEvent on its own; we subclass to
@@ -1877,43 +1897,41 @@ int main(int argc, char **argv) {
     if (!drained.isEmpty()) player.addUrls(drained);
 
     // Begin listening for additional instances now that Player is alive.
-    // The callback fires on the QLocalServer thread that handled the accept();
-    // hop to the main thread before touching Player or windows, and use a
-    // QPointer so a peer that connects during shutdown cannot dereference a
-    // destroyed Player.
+    // The callback fires on the thread that owns the QLocalServer (the main
+    // thread), so we do not need to hop with QMetaObject::invokeMethod.
+    // Use QPointer so a peer that connects during shutdown cannot
+    // dereference a destroyed Player, and use a shared_ptr<QPointer> for
+    // the main window because the QML engine is constructed further down
+    // in main() — we cannot capture the window by value here, but the
+    // server lifetime outlives the window so a heap holder is safe.
     if (!test && !parser.isSet("config") && !parser.isSet("isolated")) {
         auto *server = new MacosSingleInstance(QStringLiteral(SPUN_BUNDLE_ID), &app);
         QPointer<Player> playerPtr(&player);
-        // Resolve the root window lazily inside the queued callback. The
-        // engine is constructed further down in main(); by the time a peer
-        // connects, it has already loaded Main.qml, so the first object in
-        // its rootObjects() list is the main window we want to raise.
-        // Comparing against window title() and walking topLevelWindows() is
-        // brittle: on macOS the main window object is fixed at engine load
-        // time and other windows (about/help dialogs) come and go.
-        if (!server->listen([playerPtr](const QStringList &urls) {
+        auto mainWindowHolder = std::make_shared<QPointer<QWindow>>();
+        if (!server->listen([playerPtr, mainWindowHolder](const QStringList &urls) {
                 QPointer<Player> p = playerPtr;
-                QMetaObject::invokeMethod(qApp, [p, urls] {
-                    if (!p) return;
-                    if (!urls.isEmpty()) {
-                        QList<QUrl> queueUrls;
-                        queueUrls.reserve(urls.size());
-                        for (const auto &u : urls) queueUrls.append(QUrl(u));
-                        p->addUrls(queueUrls);
-                    }
-                    auto engines = qApp->findChildren<QQmlApplicationEngine *>();
-                    for (auto *engine : engines) {
-                        if (auto *window = qobject_cast<QQuickWindow *>(engine->rootObjects().value(0))) {
-                            window->showNormal();
-                            window->raise();
-                            window->requestActivate();
-                        }
-                    }
-                }, Qt::QueuedConnection);
+                QPointer<QWindow> w = *mainWindowHolder;
+                if (!p) return;
+                if (!urls.isEmpty()) {
+                    QList<QUrl> queueUrls;
+                    queueUrls.reserve(urls.size());
+                    for (const auto &u : urls) queueUrls.append(QUrl(u));
+                    p->addUrls(queueUrls);
+                }
+                if (w) {
+                    w->showNormal();
+                    w->raise();
+                    w->requestActivate();
+                }
             })) {
             std::cerr << "Failed to start single-instance server on " << SPUN_BUNDLE_ID
                       << "; additional invocations will start their own process." << std::endl;
         }
+        // Stash the holder for the engine-load step below to fill in. This
+        // keeps the server, the holder, and the eventual window lifetime
+        // bound together; the server is parented to `app`, the window to
+        // the engine, and the holder is captured by both.
+        server->setMainWindowHolder(mainWindowHolder);
     }
 #endif
     Youtube youtube(QFileInfo(settings).absolutePath() + "/youtube");
@@ -2045,6 +2063,18 @@ int main(int argc, char **argv) {
     if (engine.rootObjects().isEmpty()) return 1;
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     macosMenuBar.attachToWindow(window);
+#ifdef Q_OS_MACOS
+    // Publish the window to the single-instance server so a later peer can
+    // raise the actual main window instead of guessing via topLevelWindows()
+    // and a title match. The server itself was started before this point,
+    // so the only thing it needs now is the QWindow pointer.
+    if (auto *instanceServer = qobject_cast<MacosSingleInstance *>(
+            app.findChild<MacosSingleInstance *>())) {
+        if (auto holder = instanceServer->mainWindowHolder()) {
+            *holder = QPointer<QWindow>(window);
+        }
+    }
+#endif
     // Push the initial Player state into the native menu once, so the menu
     // is consistent with the QML chrome from the first frame instead of
     // waiting for the first onPlayingChanged / onMediumChanged signal.

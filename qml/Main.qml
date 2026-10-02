@@ -148,11 +148,15 @@ ApplicationWindow {
     // Cider is a virtualised Apple Music client meant for Linux/Windows
     // where there is no native MusicKit bridge. On macOS the user can
     // use Apple Music directly through the system, so the Spun UI hides
-    // the Cider-only chrome (cider source bindings, live lyrics from
-    // Cider, etc.). Setting useCider to false on osx keeps every
-    // downstream binding (Binding/timer/Connections that watch it)
-    // automatically in sync.
-    property bool useCider: !testMode && root.ciderService.available && Qt.platform.os !== "osx"
+    // the Cider-only chrome (cider source tab, the "Start Cider with
+    // Spun" preference, etc.). We expose ciderSupported as a separate
+    // readonly flag because QML bindings cannot stop an imperative
+    // "useCider = true" assignment further down — we have to guard each
+    // such assignment explicitly with `if (ciderSupported)`. Just
+    // turning useCider false here is not enough; the next imperative
+    // assignment would override it.
+    readonly property bool ciderSupported: !testMode && Qt.platform.os !== "osx"
+    property bool useCider: ciderSupported && root.ciderService.available
     property var ciderService: cider
     property var listeningService: listening
     property var actionService: musicActions
@@ -377,10 +381,10 @@ ApplicationWindow {
         if(useYoutube){if(clipboard)youtube.openClipboardLink();else youtube.search(text);libraryOpen=true;return true}
         const accepted = clipboard ? musicBrowser.browser.openClipboardLink() : musicBrowser.browser.openLink(text)
         if (!accepted) { notifyAction("Use an Apple Music song, album or playlist link.", true); return false }
-        useCider = true; libraryOpen = true
+        if (ciderSupported) { useCider = true; libraryOpen = true }
         return true
     }
-    function openArtistName(name) { if(useServer){libraryOpen=true;serverLibrary.search(name,"artists");return}; if(useYoutube){libraryOpen=true;youtube.search(name,"artists");return}; useCider = true; libraryOpen = true; library.showArtist(name) }
+    function openArtistName(name) { if(useServer){libraryOpen=true;serverLibrary.search(name,"artists");return}; if(useYoutube){libraryOpen=true;youtube.search(name,"artists");return}; if(ciderSupported){useCider=true;libraryOpen=true;library.showArtist(name)} }
     function openLibrary() { libraryOpen = !libraryOpen }
     readonly property bool queueControlsReady: !useCider || (!root.actionService.busy && root.ciderService.queueReady && !root.ciderService.queueBusy && !root.ciderService.controlBusy && !root.ciderService.queueError.length)
     readonly property bool queueReorderAllowed: queueControlsReady && !queueQuery.trim().length
@@ -628,7 +632,7 @@ ApplicationWindow {
     onHelpOpenChanged: { if (helpOpen && miniMode) player.miniMode = false; Qt.callLater(updateMask) }
     onMenuOpenChanged: Qt.callLater(updateMask)
     onWidthChanged: Qt.callLater(updateMask)
-    Component.onCompleted: { if (!testMode && player.ciderAutoStart) { useCider = true; root.ciderService.ensureRunning() }; updateMask(); platformNative.place(root); Qt.callLater(presentDisc); syncLyrics() }
+    Component.onCompleted: { if (ciderSupported && player.ciderAutoStart) { useCider = true; root.ciderService.ensureRunning() }; updateMask(); platformNative.place(root); Qt.callLater(presentDisc); syncLyrics() }
     onClosing: player.save()
     // macOS native application menu bar: route its choices through the same
     // public methods the QML buttons use. macosMenuBar is always registered
@@ -818,20 +822,31 @@ ApplicationWindow {
         MouseArea { anchors.fill: parent; onPressed: root.startSystemMove() }
         Rectangle {
             objectName: "sourceIndicator"
-            SpunSpring { id: sourceMotion; targetValue: 56 + badge.tabWidth * (root.useSubsonic ? 4 : root.useJellyfin ? 3 : root.useYoutube ? 2 : root.useCider ? 1 : 0) }
+            // Badge position depends on the active source; ciderSupported
+            // removes the Cider slot, so the per-source offset is shifted
+            // by one when cider is hidden.
+            SpunSpring { id: sourceMotion; targetValue: 56 + badge.tabWidth * (root.useSubsonic ? sourceTabItems.count - 1 : root.useJellyfin ? sourceTabItems.count - 2 : root.useYoutube ? sourceTabItems.count - 3 : root.useCider ? 1 : 0) }
             x: sourceMotion.value; y: 6; width: badge.tabWidth; height: 36; radius: 18
             color: root.inset
         }
         Row {
             id: sourceTabs
             function focusTab(index) {
-                const button = sourceTabItems.itemAt(Math.max(0, Math.min(4, index)))
+                const button = sourceTabItems.itemAt(Math.max(0, Math.min(sourceTabItems.count - 1, index)))
                 if (button) button.forceActiveFocus(Qt.TabFocusReason)
             }
             x: 56; y: 6; spacing: 0
             Repeater {
                 id: sourceTabItems
-                model: ["Local", "Cider", "YouTube", "Jellyfin", "Subsonic"]
+                // Cider is hidden on macOS: drop it from the model so the
+                // tab is not even present, and the index arithmetic in the
+                // badge + click handler stays aligned (YouTube, Jellyfin,
+                // Subsonic keep their old indices). The dynamic model also
+                // keeps the focusTab() Math.min bound correct without any
+                // branching at the call sites.
+                model: root.ciderSupported
+                    ? ["Local", "Cider", "YouTube", "Jellyfin", "Subsonic"]
+                    : ["Local", "YouTube", "Jellyfin", "Subsonic"]
                 AbstractButton {
                     id: sourceTab
                     objectName: index === 0 ? "localSourceButton" : index === 1 ? "ciderSourceButton" : index === 2 ? "youtubeSourceButton" : index === 3 ? "jellyfinSourceButton" : "subsonicSourceButton"
@@ -850,7 +865,7 @@ ApplicationWindow {
                     Keys.onRightPressed: sourceTabs.focusTab(index + 1)
                     Keys.onPressed: event => {
                         if (event.key === Qt.Key_Home) { sourceTabs.focusTab(0); event.accepted = true }
-                        else if (event.key === Qt.Key_End) { sourceTabs.focusTab(4); event.accepted = true }
+                        else if (event.key === Qt.Key_End) { sourceTabs.focusTab(sourceTabItems.count - 1); event.accepted = true }
                         else event.accepted = false
                     }
 
@@ -862,8 +877,8 @@ ApplicationWindow {
                         SpunStateLayer { anchors.fill: parent; radius: parent.radius; color: root.ink; pressed: sourceTab.down; focused: sourceTab.visualFocus; hovered: sourceTab.hovered }
                         border.width: sourceTab.visualFocus ? 2 : 0; border.color: root.accent
                     }
-                    contentItem: SpunText { text: parent.modelData; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: ((root.useSubsonic ? 4 : root.useJellyfin ? 3 : root.useYoutube ? 2 : root.useCider ? 1 : 0) === parent.index) ? root.accent : root.mutedInk; font.pixelSize: SpunStyle.body; font.weight: Font.Medium }
-                    onClicked: { if(index===0)root.useLocal(); else if(index===1){root.useYoutube=false;root.useCider=true;if(player.ciderAutoStart)root.ciderService.ensureRunning()} else if(index===2){root.useYoutube=true;root.libraryOpen=true} else if(index===3){root.useJellyfin=true;root.libraryOpen=true} else {root.useSubsonic=true;root.libraryOpen=true} }
+                    contentItem: SpunText { text: parent.modelData; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: ((root.useSubsonic ? sourceTabItems.count - 1 : root.useJellyfin ? sourceTabItems.count - 2 : root.useYoutube ? sourceTabItems.count - 3 : root.useCider ? 1 : 0) === parent.index) ? root.accent : root.mutedInk; font.pixelSize: SpunStyle.body; font.weight: Font.Medium }
+                    onClicked: { if(index===0)root.useLocal(); else if(index===1 && root.ciderSupported){root.useYoutube=false;root.useCider=true;if(player.ciderAutoStart)root.ciderService.ensureRunning()} else if(index===sourceTabItems.count-3){root.useYoutube=true;root.libraryOpen=true} else if(index===sourceTabItems.count-2){root.useJellyfin=true;root.libraryOpen=true} else {root.useSubsonic=true;root.libraryOpen=true} }
                 }
             }
         }
@@ -2089,7 +2104,7 @@ ApplicationWindow {
             SpunButton { objectName: "confirmCleanup"; x: parent.width - width; y: parent.height - 40; width: 96; text: "Remove"; tonal: true; enabled: !cleanupPopup.stale && root.queueControlsReady && (cleanupPopup.preview.rows || []).length > 0; onClicked: { if (cleanupPopup.preview.mode === "selection") root.ciderService.editQueueSelection(cleanupPopup.preview.indices, "remove", cleanupPopup.preview.revision); else root.ciderService.cleanQueue(cleanupPopup.preview.mode, cleanupPopup.preview.revision); cleanupPopup.close() } }
         } }
     }
-    function openSavedQueues() { root.useCider = true; root.libraryOpen = true; musicBrowser.browser.section = "sessions" }
+    function openSavedQueues() { if (root.ciderSupported) { root.useCider = true; root.libraryOpen = true; musicBrowser.browser.section = "sessions" } }
     function renameQueue(queue, service) { saveQueuePopup.service = service; saveQueuePopup.renameTarget = queue; saveQueuePopup.open() }
     function confirmDeleteQueue(id, service) { deleteQueuePopup.queueId = id; deleteQueuePopup.service = service; deleteQueuePopup.open() }
     Menu {
@@ -2097,9 +2112,9 @@ ApplicationWindow {
         background: Rectangle { color: SpunStyle.popup; radius: SpunStyle.popupRadius }
         enter: SpunPopupEnter {}
         exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: SpunStyle.exit; easing.type: Easing.BezierSpline; easing.bezierCurve: SpunStyle.effectsCurve } }
-        SettingsAction { objectName: "saveQueueAction"; text: "Save queue"; glyphName: "plus"; enabled: root.ciderService.queueReady && !root.ciderService.queueBusy && root.ciderService.queue.length > 0; onTriggered: saveQueuePopup.open() }
-        SettingsAction { objectName: "recoverSessionAction"; visible: root.useCider && !!root.listeningService.session.trackCount; text: "Recover session…"; glyphName: "refresh"; enabled: !root.listeningService.busy; onTriggered: root.showRecovery() }
-        SettingsAction { objectName: "savedQueuesAction"; text: "Saved queues"; glyphName: "queue"; onTriggered: root.openSavedQueues() }
+        SettingsAction { objectName: "saveQueueAction"; visible: root.ciderSupported; text: "Save queue"; glyphName: "plus"; enabled: root.ciderService.queueReady && !root.ciderService.queueBusy && root.ciderService.queue.length > 0; onTriggered: saveQueuePopup.open() }
+        SettingsAction { objectName: "recoverSessionAction"; visible: root.ciderSupported && root.useCider && !!root.listeningService.session.trackCount; text: "Recover session…"; glyphName: "refresh"; enabled: !root.listeningService.busy; onTriggered: root.showRecovery() }
+        SettingsAction { objectName: "savedQueuesAction"; visible: root.ciderSupported; text: "Saved queues"; glyphName: "queue"; onTriggered: root.openSavedQueues() }
         SettingsAction { objectName: "deduplicateQueueAction"; text: "Remove duplicates…"; glyphName: "minus"; enabled: root.queueControlsReady; onTriggered: root.previewQueueCleanup("duplicates") }
         SettingsAction { objectName: "clearUpcomingAction"; text: "Clear upcoming…"; glyphName: "close"; enabled: root.queueControlsReady; onTriggered: root.previewQueueCleanup("upcoming") }
     }
@@ -2543,7 +2558,7 @@ ApplicationWindow {
                         PreferenceSwitch { objectName: "motionToggle"; app: root; width: parent.width; text: "Animations"; glyphName: "motion"; checked: player.motion; onToggled: player.motion = checked; onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
                         Rectangle { x: 12; width: parent.width - 24; height: 1; color: root.hairline }
                         PreferenceSwitch { objectName: "rememberSessionToggle"; app: root; width: parent.width; text: "Remember Cider session"; glyphName: "queue"; checked: root.listeningService.rememberSession; enabled: !root.listeningService.busy; onToggled: root.listeningService.rememberSession = checked; onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
-                        PreferenceSwitch { objectName: "ciderAutoStartToggle"; app: root; width: parent.width; text: "Start Cider with Spun"; glyphName: "power"; checked: player.ciderAutoStart; onToggled: { player.ciderAutoStart = checked; if (checked && root.useCider) root.ciderService.ensureRunning() } onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
+                        PreferenceSwitch { objectName: "ciderAutoStartToggle"; visible: root.ciderSupported; app: root; width: parent.width; text: "Start Cider with Spun"; glyphName: "power"; checked: player.ciderAutoStart; onToggled: { player.ciderAutoStart = checked; if (checked && root.useCider) root.ciderService.ensureRunning() } onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
                         PreferenceSwitch { objectName: "autoplayToggle"; app: root; width: parent.width; visible: root.useCider; height: visible ? implicitHeight : 0; text: "Autoplay"; glyphName: "autoplay"; checked: root.ciderService.autoplay; enabled: root.ciderService.modesReady && !root.ciderService.controlBusy; onToggled: root.ciderService.setAutoplay(checked); onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
                         MenuEntry { objectName: "crossfadeAction"; app: root; width: parent.width; visible: root.useCider; text: "Audio settings"; glyphName: "crossfade"; onTriggered: { preferences.close(); Qt.callLater(function() { crossfadeMenu.open() }) } onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
                     }
