@@ -168,16 +168,22 @@ To launch the resulting bundle directly (bypassing LaunchServices):
 ./build/Spun.app/Contents/MacOS/Spun
 ```
 
-**Why `Class X is implemented in both` warnings appear during development.** Qt installed via Homebrew ships its frameworks under `/opt/homebrew/Cellar/qtbase/6.11.2/lib`. Homebrew adds that directory to `/opt/homebrew/lib` (the `/opt/homebrew/opt/qtbase` symlink), and `macdeployqt` copies the binary with its original `LC_LOAD_DYLIB` load commands intact — i.e. still pointing at `/opt/homebrew/opt/qtbase/lib/QtCore.framework/...`. dyld resolves those names by walking the `@rpath` search list *and* the dyld fallback path that the linker picked up at build time, finds the same framework twice (once inside the bundle, once in Homebrew), and prints `objc[Spun]: Class QT_ROOT_LEVEL_POOL__THESE_OBJECTS_WILL_BE_RELEASED_WHEN_QAPP_GOES_OUT_OF_SCOPE is implemented in both ...` for every colliding Objective-C class.
+**Why `Class X is implemented in both` warnings appear during development.** Qt installed via Homebrew ships its frameworks under `/opt/homebrew/Cellar/qtbase/6.11.2/lib`. `macdeployqt` copies the binary with its original `LC_LOAD_DYLIB` load commands intact — i.e. still pointing at `/opt/homebrew/opt/qtbase/lib/QtCore.framework/...` — and `scripts/sign-macos-bundle.sh` then rewrites every such reference (and the corresponding `LC_ID_DYLIB` on the copied framework itself) to `@executable_path/../Frameworks/...`. The script also runs an `otool -L` scan over every binary in the bundle and aborts with the offending files if any Homebrew reference survives, so the `.app` shipped from a clean build never names `/opt/homebrew` itself.
 
-`scripts/sign-macos-bundle.sh` rewrites every `/opt/homebrew/...` reference in the bundle (both LC_LOAD_DYLIB on the dependents and LC_ID_DYLIB on the copied frameworks) to `@executable_path/../Frameworks/...`, then scans every executable and aborts with a list of offenders if any survive. You can verify your bundle is clean with:
+The exact reason the duplicate-class warning can still appear on a *developer* machine that has Homebrew's Qt installed is **not fully understood** — it survives even when the bundle's own binaries are clean by the `otool -L` check, which means dyld is locating the second copy via some path that is not `LC_LOAD_DYLIB`. Candidates include:
+
+- A `qt.conf` file that points at the Homebrew prefix (`Contents/Resources/qt.conf` inside the bundle);
+- An environment variable inherited from the developer's shell (`DYLD_FALLBACK_FRAMEWORK_PATH`, `QT_PLUGIN_PATH`, `QML_IMPORT_PATH`);
+- A process started through the developer's Homebrew-launchd context.
+
+Reproduce and pinpoint the loader path that brings in the second copy with:
 
 ```sh
-find build/Spun.app/Contents -type f -perm +111 -exec otool -L {} \; \
-    | grep '/opt/homebrew' || echo "Bundle is clean."
+DYLD_PRINT_LIBRARIES=1 ./build/Spun.app/Contents/MacOS/Spun 2>&1 | head -40
+# Look for "/opt/homebrew" or "/usr/local" in the dylibs Spun pulls in.
 ```
 
-If that prints nothing the bundle itself is fine. The user-visible .app shipped through this build never sees Homebrew because no `LC_LOAD_DYLIB` inside it names it; the warning only appears when the developer's own machine has `brew install qt` and dyld still resolves the original Homebrew copy.
+If the duplicate still appears, file an issue with the `DYLD_PRINT_LIBRARIES` output; until a root cause is established the README stays short on speculation.
 
 </details>
 
@@ -398,7 +404,7 @@ You can then delete the Spun source folder. Your music stays where it was. Prefe
 - **A font is missing:** install it, reopen Spun and select it again. An unavailable saved font falls back to the system font.
 - **An audio file will not play:** supported formats depend on the codecs available to Qt Multimedia on your distribution.
 - **"Spun.app is damaged and can't be opened" on macOS:** the ad-hoc signature is intact but the file has the `com.apple.quarantine` xattr. Run `xattr -dr com.apple.quarantine /Applications/Spun.app` or move the app out of and back into `/Applications` (Finder re-extends quarantine to downloads). The right-click → Open workaround described in [First launch on macOS](#first-launch-on-macos) is the supported path.
-- **`objc[...] Class X is implemented in both` warnings on macOS:** symptom of `/opt/homebrew/lib` still being on macOS's implicit framework search path while a Homebrew Qt is installed. The bundle's own binaries are clean — `sign-macos-bundle.sh` rewrites every `/opt/homebrew` reference and fails the build if any survive. Verify with `find build/Spun.app/Contents -type f -perm +111 -exec otool -L {} \; | grep '/opt/homebrew'` (no output = clean). See [Build on macOS](#install) for the full explanation.
+- **`objc[...] Class X is implemented in both` warnings on macOS:** appears when Homebrew's `qt` formula is installed and dyld is locating the second framework copy via a path that is not `LC_LOAD_DYLIB` (cause not fully understood — see [Build on macOS](#install) for the diagnostics). The bundle's own binaries are clean — `sign-macos-bundle.sh` rewrites every `/opt/homebrew` reference and fails the build if any survive. Verify with `find build/Spun.app/Contents -type f -perm +111 -exec otool -L {} \; | grep '/opt/homebrew'` (no output = clean); if the bundle is clean but the warning still appears, file an issue with the output of `DYLD_PRINT_LIBRARIES=1 ./build/Spun.app/Contents/MacOS/Spun`.
 
 Spun does not ask for your Apple Music password. Its Cider token is stored with owner-only file permissions in `~/.config/spun/cider-connection.json`. Preferences and local listening data also stay in `~/.config/spun/`. Artwork and music metadata may be fetched during playback and browsing. Do not include tokens, private configuration, listening history or personal logs in issue reports.
 
