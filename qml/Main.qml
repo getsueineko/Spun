@@ -145,7 +145,14 @@ ApplicationWindow {
         clearQueueSelection(); cancelQueueDrag(); queueMenu.close(); songMenu.close(); musicBrowser.closeActions()
         Qt.callLater(function(){presentDisc();syncLyrics();updateMask()})
     }
-    property bool useCider: !testMode && root.ciderService.available
+    // Cider is a virtualised Apple Music client meant for Linux/Windows
+    // where there is no native MusicKit bridge. On macOS the user can
+    // use Apple Music directly through the system, so the Spun UI hides
+    // the Cider-only chrome (cider source bindings, live lyrics from
+    // Cider, etc.). Setting useCider to false on osx keeps every
+    // downstream binding (Binding/timer/Connections that watch it)
+    // automatically in sync.
+    property bool useCider: !testMode && root.ciderService.available && Qt.platform.os !== "osx"
     property var ciderService: cider
     property var listeningService: listening
     property var actionService: musicActions
