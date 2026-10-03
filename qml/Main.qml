@@ -145,24 +145,24 @@ ApplicationWindow {
         clearQueueSelection(); cancelQueueDrag(); queueMenu.close(); songMenu.close(); musicBrowser.closeActions()
         Qt.callLater(function(){presentDisc();syncLyrics();updateMask()})
     }
-    // Cider is a virtualised Apple Music client meant for Linux/Windows
-    // where there is no native MusicKit bridge. On macOS the user can
-    // use Apple Music directly through the system, so the Spun UI hides
-    // the Cider-only chrome (cider source tab, the "Start Cider with
-    // Spun" preference, etc.). We expose ciderSupported as a separate
-    // readonly flag because QML bindings cannot stop an imperative
-    // "useCider = true" assignment further down — we have to guard each
-    // such assignment explicitly with `if (ciderSupported)`. Just
-    // turning useCider false here is not enough; the next imperative
+    // Cider is a virtualised Apple Music client. It runs on every
+    // platform; the source tab, the "Start Cider with Spun" preference
+    // and the Save queue / Saved queues / Recover session settings
+    // entries are visible everywhere. We expose ciderSupported as a
+    // separate readonly flag because QML bindings cannot stop an
+    // imperative "useCider = true" assignment further down — we have to
+    // guard each such assignment explicitly with `if (ciderSupported)`.
+    // Just turning useCider false here is not enough; the next imperative
     // assignment would override it.
     //
     // testMode must NOT switch this off: the self-tests (src/main.cpp) click
     // and focus the Cider tab on every platform. They never get a live Cider
     // anyway, because useCider below is false in testMode.
-    readonly property bool ciderSupported: testMode || Qt.platform.os !== "osx"
-    property bool useCider: !testMode && ciderSupported && root.ciderService.available
-    // Name of the active source tab. Tabs are identified by name, not by
-    // position, because the Cider tab is absent from the list on macOS.
+    readonly property bool ciderSupported: testMode
+    property bool useCider: !testMode && root.ciderService.available
+    // Name of the active source tab. Tabs are identified by name so the
+    // keyboard navigation, the source indicator badge, and the click
+    // handler do not depend on a hard-coded source ordering.
     readonly property string activeSource: useSubsonic ? "Subsonic" : useJellyfin ? "Jellyfin" : useYoutube ? "YouTube" : useCider ? "Cider" : "Local"
     property var ciderService: cider
     property var listeningService: listening
@@ -388,10 +388,10 @@ ApplicationWindow {
         if(useYoutube){if(clipboard)youtube.openClipboardLink();else youtube.search(text);libraryOpen=true;return true}
         const accepted = clipboard ? musicBrowser.browser.openClipboardLink() : musicBrowser.browser.openLink(text)
         if (!accepted) { notifyAction("Use an Apple Music song, album or playlist link.", true); return false }
-        if (ciderSupported) { useCider = true; libraryOpen = true }
+        useCider = true; libraryOpen = true
         return true
     }
-    function openArtistName(name) { if(useServer){libraryOpen=true;serverLibrary.search(name,"artists");return}; if(useYoutube){libraryOpen=true;youtube.search(name,"artists");return}; if(ciderSupported){useCider=true;libraryOpen=true;library.showArtist(name)} }
+    function openArtistName(name) { if(useServer){libraryOpen=true;serverLibrary.search(name,"artists");return}; if(useYoutube){libraryOpen=true;youtube.search(name,"artists");return}; useCider=true;libraryOpen=true;library.showArtist(name) }
     function openLibrary() { libraryOpen = !libraryOpen }
     readonly property bool queueControlsReady: !useCider || (!root.actionService.busy && root.ciderService.queueReady && !root.ciderService.queueBusy && !root.ciderService.controlBusy && !root.ciderService.queueError.length)
     readonly property bool queueReorderAllowed: queueControlsReady && !queueQuery.trim().length
@@ -655,7 +655,7 @@ ApplicationWindow {
     onHelpOpenChanged: { if (helpOpen && miniMode) player.miniMode = false; Qt.callLater(updateMask) }
     onMenuOpenChanged: Qt.callLater(updateMask)
     onWidthChanged: Qt.callLater(updateMask)
-    Component.onCompleted: { if (!testMode && ciderSupported && player.ciderAutoStart) { useCider = true; root.ciderService.ensureRunning() }; updateMask(); platformNative.place(root); Qt.callLater(presentDisc); syncLyrics() }
+    Component.onCompleted: { if (!testMode && player.ciderAutoStart) { useCider = true; root.ciderService.ensureRunning() }; updateMask(); platformNative.place(root); Qt.callLater(presentDisc); syncLyrics() }
     onClosing: player.save()
     // macOS native application menu bar: route its choices through the same
     // public methods the QML buttons use. macosMenuBar is always registered
@@ -851,9 +851,7 @@ ApplicationWindow {
         }
         Row {
             id: sourceTabs
-            readonly property var sources: root.ciderSupported
-                ? ["Local", "Cider", "YouTube", "Jellyfin", "Subsonic"]
-                : ["Local", "YouTube", "Jellyfin", "Subsonic"]
+            readonly property var sources: ["Local", "Cider", "YouTube", "Jellyfin", "Subsonic"]
             function focusTab(index) {
                 const button = sourceTabItems.itemAt(Math.max(0, Math.min(sourceTabItems.count - 1, index)))
                 if (button) button.forceActiveFocus(Qt.TabFocusReason)
@@ -902,7 +900,7 @@ ApplicationWindow {
                     onClicked: {
                         switch (modelData) {
                         case "Local": root.useLocal(); break
-                        case "Cider": if (root.ciderSupported) { root.useYoutube = false; root.useCider = true; if (player.ciderAutoStart) root.ciderService.ensureRunning() } break
+                        case "Cider": root.useYoutube = false; root.useCider = true; if (player.ciderAutoStart) root.ciderService.ensureRunning(); break
                         case "YouTube": root.useYoutube = true; root.libraryOpen = true; break
                         case "Jellyfin": root.useJellyfin = true; root.libraryOpen = true; break
                         default: root.useSubsonic = true; root.libraryOpen = true
@@ -2133,7 +2131,7 @@ ApplicationWindow {
             SpunButton { objectName: "confirmCleanup"; x: parent.width - width; y: parent.height - 40; width: 96; text: "Remove"; tonal: true; enabled: !cleanupPopup.stale && root.queueControlsReady && (cleanupPopup.preview.rows || []).length > 0; onClicked: { if (cleanupPopup.preview.mode === "selection") root.ciderService.editQueueSelection(cleanupPopup.preview.indices, "remove", cleanupPopup.preview.revision); else root.ciderService.cleanQueue(cleanupPopup.preview.mode, cleanupPopup.preview.revision); cleanupPopup.close() } }
         } }
     }
-    function openSavedQueues() { if (root.ciderSupported) { root.useCider = true; root.libraryOpen = true; musicBrowser.browser.section = "sessions" } }
+    function openSavedQueues() { root.useCider = true; root.libraryOpen = true; musicBrowser.browser.section = "sessions" }
     function renameQueue(queue, service) { saveQueuePopup.service = service; saveQueuePopup.renameTarget = queue; saveQueuePopup.open() }
     function confirmDeleteQueue(id, service) { deleteQueuePopup.queueId = id; deleteQueuePopup.service = service; deleteQueuePopup.open() }
     Menu {
@@ -2141,9 +2139,9 @@ ApplicationWindow {
         background: Rectangle { color: SpunStyle.popup; radius: SpunStyle.popupRadius }
         enter: SpunPopupEnter {}
         exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: SpunStyle.exit; easing.type: Easing.BezierSpline; easing.bezierCurve: SpunStyle.effectsCurve } }
-        SettingsAction { objectName: "saveQueueAction"; visible: root.ciderSupported; text: "Save queue"; glyphName: "plus"; enabled: root.ciderService.queueReady && !root.ciderService.queueBusy && root.ciderService.queue.length > 0; onTriggered: saveQueuePopup.open() }
-        SettingsAction { objectName: "recoverSessionAction"; visible: root.ciderSupported && root.useCider && !!root.listeningService.session.trackCount; text: "Recover session…"; glyphName: "refresh"; enabled: !root.listeningService.busy; onTriggered: root.showRecovery() }
-        SettingsAction { objectName: "savedQueuesAction"; visible: root.ciderSupported; text: "Saved queues"; glyphName: "queue"; onTriggered: root.openSavedQueues() }
+        SettingsAction { objectName: "saveQueueAction"; text: "Save queue"; glyphName: "plus"; enabled: root.ciderService.queueReady && !root.ciderService.queueBusy && root.ciderService.queue.length > 0; onTriggered: saveQueuePopup.open() }
+        SettingsAction { objectName: "recoverSessionAction"; visible: root.useCider && !!root.listeningService.session.trackCount; text: "Recover session…"; glyphName: "refresh"; enabled: !root.listeningService.busy; onTriggered: root.showRecovery() }
+        SettingsAction { objectName: "savedQueuesAction"; text: "Saved queues"; glyphName: "queue"; onTriggered: root.openSavedQueues() }
         SettingsAction { objectName: "deduplicateQueueAction"; text: "Remove duplicates…"; glyphName: "minus"; enabled: root.queueControlsReady; onTriggered: root.previewQueueCleanup("duplicates") }
         SettingsAction { objectName: "clearUpcomingAction"; text: "Clear upcoming…"; glyphName: "close"; enabled: root.queueControlsReady; onTriggered: root.previewQueueCleanup("upcoming") }
     }
@@ -2587,7 +2585,7 @@ ApplicationWindow {
                         PreferenceSwitch { objectName: "motionToggle"; app: root; width: parent.width; text: "Animations"; glyphName: "motion"; checked: player.motion; onToggled: player.motion = checked; onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
                         Rectangle { x: 12; width: parent.width - 24; height: 1; color: root.hairline }
                         PreferenceSwitch { objectName: "rememberSessionToggle"; app: root; width: parent.width; text: "Remember Cider session"; glyphName: "queue"; checked: root.listeningService.rememberSession; enabled: !root.listeningService.busy; onToggled: root.listeningService.rememberSession = checked; onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
-                        PreferenceSwitch { objectName: "ciderAutoStartToggle"; visible: root.ciderSupported; app: root; width: parent.width; text: "Start Cider with Spun"; glyphName: "power"; checked: player.ciderAutoStart; onToggled: { player.ciderAutoStart = checked; if (checked && root.useCider) root.ciderService.ensureRunning() } onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
+                        PreferenceSwitch { objectName: "ciderAutoStartToggle"; app: root; width: parent.width; text: "Start Cider with Spun"; glyphName: "power"; checked: player.ciderAutoStart; onToggled: { player.ciderAutoStart = checked; if (checked && root.useCider) root.ciderService.ensureRunning() } onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
                         PreferenceSwitch { objectName: "autoplayToggle"; app: root; width: parent.width; visible: root.useCider; height: visible ? implicitHeight : 0; text: "Autoplay"; glyphName: "autoplay"; checked: root.ciderService.autoplay; enabled: root.ciderService.modesReady && !root.ciderService.controlBusy; onToggled: root.ciderService.setAutoplay(checked); onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
                         MenuEntry { objectName: "crossfadeAction"; app: root; width: parent.width; visible: root.useCider; text: "Audio settings"; glyphName: "crossfade"; onTriggered: { preferences.close(); Qt.callLater(function() { crossfadeMenu.open() }) } onActiveFocusChanged: if (activeFocus) preferenceScroll.reveal(this) }
                     }
