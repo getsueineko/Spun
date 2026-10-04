@@ -28,25 +28,35 @@ Play local music, browse YouTube Music anonymously, connect to Jellyfin, Navidro
 
 Linux is the primary platform. macOS is fully supported on Apple Silicon running macOS 14 (Sonoma) or newer; an Intel build is not provided.
 
-### macOS port status (as of `macos-port-v1.2.1`)
+### macOS port status
 
-Shipped on macOS and verified end-to-end on a real M-series Mac with Homebrew Qt 6.11.2:
+Linux is the primary development platform and the one the project is built around. The macOS port shares the same C++/QML source, runs the same feature set end-to-end, and is verified manually before every release on Apple Silicon with Homebrew Qt 6.11.2 and macOS 14+.
 
-- **Standalone `.app` bundle** (~235 MB) with all Qt frameworks, QML modules and an ad-hoc signature bundled in. No Qt / TagLib / Homebrew required on the user's machine.
-- **Native macOS application menu bar** with six menus (Spun, File, View, Playback, Window, Help). Standard macOS key equivalents wired (Cmd+Q, Cmd+H, Cmd+Opt+H, Cmd+W, Cmd+Opt+M, Cmd+O, Cmd+Shift+O, Cmd+L, Cmd+\\, Cmd+Shift+S, Cmd+Shift+R, Cmd+←/→, Cmd+,). Space for play/pause is left to the QML Shortcut. Cmd+M is the standard Minimize (Window menu); Spun's Mini Mode is on Cmd+Opt+M.
-- **System accent color** (`+[NSColor controlAccentColor]`) drives play / pause, progress, focus rings, queue selection, active tab and every other UI accent. Updates live via `AppleColorPreferencesChangedNotification`, with a 5 s polling fallback for ad-hoc-signed bundles where the notification is dropped.
-- **Three ctest regressions fixed** for macOS: `spun-youtube` / `spun-playback-and-ui` / `spun-immersive-media-ui` now route through `$<TARGET_FILE:spun-diagnostics>` instead of relying on src/main.cpp's `/proc/self/exe` execv into a sibling binary that does not exist inside the .app bundle; the Add Music loader wait test now matches the FileDialog Loader lifecycle; the folder-import test compares canonical paths so it survives the `/var` → `/private/var` symlink.
-- **`scripts/build-macos.sh`** wires `CMAKE_PREFIX_PATH` to Homebrew's Qt, patches two GNU-isms in the CMake link step (`-Wl,-dead_strip`, BSD `strip -x`), and produces `build/Spun.app` with frameworks, QML modules and an ad-hoc signature bundled in. Full build takes about three minutes.
+**Works the same as Linux:**
 
-**Not yet implemented** for macOS:
+- Local library, YouTube (anonymous), Jellyfin / Navidrome / Subsonic, Cider (Apple Music) sources, queue and queue cleanup, library browser, recovery sessions, QuickJump, settings and preferences.
+- The standalone `.app` bundle ships all Qt frameworks, QML modules, and an ad-hoc signature. No Qt / TagLib / Homebrew required on the user's machine.
+- All five 3D players (CD, vinyl, cassette, recorder, TX-6 mixer), palette follow-through, scaling, motion checks, capture-and-compare self-tests that do not require a real audio device.
+- Standalone file-open, drag-and-drop, file dialogs, theming, font handling.
 
-- **No Homebrew formula or cask.** Install from the GitHub release tarball only (see [Install on macOS](#install)).
-- **No CI on a macOS runner.** Builds are tested manually before tagging; there is no `.github/workflows/macos.yml`.
-- **No Developer ID signing or Apple notarisation.** First launch needs the right-click → Open workaround; subsequent launches work normally.
-- **No Intel build.** Apple Silicon only; x86_64 macs are not supported.
-- **Some ctest cases fail on macOS.** See [Known limitations](#known-limitations) — they depend on real audio output or `secret-tool` / D-Bus, both unavailable on macOS 14.
-- **Multi-window handling is not wired.** The native menu's `Close Window` / `Minimize` / `Zoom` items target `[NSApp keyWindow]`. Spun only ever has one window so this is fine, but a second instance would behave like the first.
-- **Native MPNowPlayingInfoCenter / Keychain / media keys** are not implemented. Spun falls back to plain text tokens in `~/Library/Application Support/com.yappologistic.spun/` and whatever Qt's media-session plugin provides.
+**Added specifically for macOS:**
+
+- Native application menu bar (Spun, File, View, Playback, Window, Help) with standard macOS key equivalents (Cmd+Q, Cmd+H, Cmd+W, Cmd+O, Cmd+L, Cmd+\\, Cmd+Shift+S, Cmd+Shift+R, Cmd+←/→, Cmd+,, Cmd+M for Minimize, Cmd+Opt+M for Spun's Mini Mode).
+- System accent colour from `[NSColor controlAccentColor]`, live-updated via `AppleColorPreferencesChangedNotification` with a 5 s polling fallback for ad-hoc-signed bundles where the notification is dropped.
+- Single-instance forwarding via a `QLocalServer` named after the bundle identifier: a second launch from Finder (with or without files) routes the URLs into the running instance and exits, instead of opening another window.
+- FileOpen events from Finder / Dock, captured by a `QGuiApplication` subclass and drained into `Player::addUrls` once Player is alive.
+- Custom rpath rewriting in `scripts/sign-macos-bundle.sh`: Homebrew Qt's original `LC_LOAD_DYLIB` paths are rewritten to `@executable_path/../Frameworks/...` so dyld only loads the bundled frameworks, not the developer's Homebrew copy.
+
+**Limited or missing compared to Linux (in priority order):**
+
+- **No CI on a macOS runner.** Builds and tests are run manually on a real M-series Mac before tagging; there is no `.github/workflows/macos.yml`. The same code passes `ctest` on Linux.
+- **No Developer ID signing or Apple notarisation.** First launch needs the right-click → Open workaround; subsequent launches work normally. See [First launch on macOS](#first-launch-on-macos).
+- **No Homebrew formula or cask.** Install from the GitHub release tarball only.
+- **No Intel build.** Apple Silicon only; x86_64 Macs are not supported.
+- **Some ctest cases fail on macOS.** The `spun-youtube`, `spun-immersive-media-ui`, the real-audio parts of `spun-playback-and-ui`, the `player->position() > 100` checks in `spun-remote-library`, and the `keyringSaveRestoreAndForget` checks in `spun-jellyfin-protocol` / `spun-subsonic-protocol` all need either a real audio output device (no AudioUnit null backend on macOS 14 in this configuration) or `secret-tool` / D-Bus (no equivalent on macOS). They are pre-existing headless-platform gaps, not regressions. `spun-desktop-media` is excluded from the macOS CTest run by design.
+- **No native media-session integration.** Spun does not yet publish to `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter`. Media keys and the macOS Now Playing widget rely on whatever Qt's media-session plugin exposes.
+- **Tokens stored as plain text.** Jellyfin / Subsonic / Cider credentials land in `~/Library/Application Support/com.yappologistic.spun/` instead of the Keychain. Replace with `SecItemAdd` / `SecItemCopyMatching` before any public release.
+- **`Class X is implemented in both` warnings** on developer machines that have Homebrew's `qt` formula installed alongside the running `Spun.app`. The shipped bundle itself is clean — see [Build on macOS](#build-on-macos) for the diagnostics.
 
 **Source-available · PolyForm Noncommercial 1.0.0.** Personal and other permitted noncommercial use is free. This is not an OSI-approved open-source license. [Read the license details](#license).
 
@@ -64,6 +74,81 @@ Spun on macOS ships as a standalone `.app` bundle with all Qt frameworks inside.
 4. The first launch needs an extra step because the bundle is not notarised — see [First launch on macOS](#first-launch-on-macos).
 
 There is no Homebrew formula or cask yet — install from the release tarball only.
+
+#### Build on macOS
+
+Apple Silicon only, macOS 14 (Sonoma) or newer. This section is only for working on Spun itself or building from source. End users download the prebuilt `.app` from the release page above.
+
+Build dependencies are installed with Homebrew:
+
+```bash
+brew install qt cmake ninja pkg-config taglib
+```
+
+Then, from a fresh clone:
+
+```bash
+./scripts/build-macos.sh -DBUILD_TESTING=OFF
+```
+
+The script wires `CMAKE_PREFIX_PATH` to Homebrew's Qt, patches two GNU-isms in the CMake link step (`-Wl,-dead_strip`, BSD `strip -x`), and produces `build/Spun.app` with Qt frameworks, QML modules and an ad-hoc signature bundled in. The whole thing takes about three minutes on an M-series Mac.
+
+If you also want the diagnostic companion:
+
+```bash
+cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target spun-diagnostics --parallel 4
+```
+
+To launch the resulting bundle directly (bypassing LaunchServices):
+
+```bash
+./build/Spun.app/Contents/MacOS/Spun
+```
+
+If your Qt is installed outside Homebrew (the official Qt installer, a CI image, etc.), point `scripts/build-macos.sh` at it so the sign script can find any missing transitive framework or dylib:
+
+```bash
+SPUN_QT_PREFIX=/path/to/Qt/6.x.y/macos ./scripts/build-macos.sh -DBUILD_TESTING=OFF
+```
+
+**`Class X is implemented in both` warnings during development.** `scripts/sign-macos-bundle.sh` rewrites every `/opt/homebrew/...` reference in the bundle (both `LC_LOAD_DYLIB` on the dependents and `LC_ID_DYLIB` on the copied frameworks) to `@executable_path/../Frameworks/...`, then walks every binary with `otool -L` and aborts the build with the full list of offenders if any Homebrew reference survives. Verify the result yourself with:
+
+```sh
+find build/Spun.app -type f -exec otool -L {} \; | grep '/opt/homebrew' || echo "Bundle is clean."
+```
+
+The shipped `.app` is therefore always clean. The duplicate-class warning can still appear on a *developer* machine that has Homebrew's `qt` formula installed, because dyld is locating the second copy via a path that is not `LC_LOAD_DYLIB`. The exact mechanism is **not yet established**. The most likely candidates are:
+
+- A `qt.conf` file pointing at the Homebrew prefix (`Contents/Resources/qt.conf` inside the bundle);
+- An inherited environment variable (`DYLD_FALLBACK_FRAMEWORK_PATH`, `QT_PLUGIN_PATH`, `QML_IMPORT_PATH`);
+- The process started through the developer's Homebrew-launchd context.
+
+Pinpoint the loader path that brings in the second copy with:
+
+```sh
+DYLD_PRINT_LIBRARIES=1 ./build/Spun.app/Contents/MacOS/Spun 2>&1 | head -40
+# Look for "/opt/homebrew" or "/usr/local" in the dylibs Spun pulls in.
+```
+
+If the duplicate still appears after the build is clean, please file an issue with the `DYLD_PRINT_LIBRARIES` output attached.
+
+#### First launch on macOS
+
+Because the `.app` is ad-hoc-signed and not notarised by Apple, double-clicking it the first time opens a Gatekeeper dialog that says the developer cannot be verified.
+
+1. In Finder, right-click (or Control-click) `Spun.app` and choose **Open**.
+2. Click **Open** in the dialog that appears.
+3. macOS remembers the decision for future launches.
+
+Alternatively, from the terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Spun.app
+open /Applications/Spun.app
+```
+
+The bundle is self-contained: it does not need Homebrew Qt, TagLib or any other dependency installed on the user's machine.
 
 ### Linux
 
@@ -137,72 +222,6 @@ nix develop
 The license is noncommercial, so Nix requires an explicit unfree-package opt-in. The flake supports x86_64 and aarch64 Linux. Wayland and X11 plugins are included; no display backend is forced.
 
 </details>
-
-<details>
-<summary><b>Build on macOS (Apple Silicon, macOS 14+)</b></summary>
-
-Build dependencies are installed with Homebrew:
-
-```bash
-brew install qt cmake ninja pkg-config taglib
-```
-
-Then, from a fresh clone:
-
-```bash
-./scripts/build-macos.sh -DBUILD_TESTING=OFF
-```
-
-The script wires `CMAKE_PREFIX_PATH` to Homebrew's Qt, patches two GNU-isms in the CMake link step (`-Wl,-dead_strip`, BSD `strip -x`), and produces `build/Spun.app` with Qt frameworks, QML modules and an ad-hoc signature bundled in. The whole thing takes about three minutes on an M-series Mac.
-
-If you also want the diagnostic companion:
-
-```bash
-cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target spun-diagnostics --parallel 4
-```
-
-To launch the resulting bundle directly (bypassing LaunchServices):
-
-```bash
-./build/Spun.app/Contents/MacOS/Spun
-```
-
-**Why `Class X is implemented in both` warnings appear during development.** Qt installed via Homebrew ships its frameworks under `/opt/homebrew/Cellar/qtbase/6.11.2/lib`. `macdeployqt` copies the binary with its original `LC_LOAD_DYLIB` load commands intact — i.e. still pointing at `/opt/homebrew/opt/qtbase/lib/QtCore.framework/...` — and `scripts/sign-macos-bundle.sh` then rewrites every such reference (and the corresponding `LC_ID_DYLIB` on the copied framework itself) to `@executable_path/../Frameworks/...`. The script also runs an `otool -L` scan over every binary in the bundle and aborts with the offending files if any Homebrew reference survives, so the `.app` shipped from a clean build never names `/opt/homebrew` itself.
-
-The exact reason the duplicate-class warning can still appear on a *developer* machine that has Homebrew's Qt installed is **not fully understood** — it survives even when the bundle's own binaries are clean by the `otool -L` check, which means dyld is locating the second copy via some path that is not `LC_LOAD_DYLIB`. Candidates include:
-
-- A `qt.conf` file that points at the Homebrew prefix (`Contents/Resources/qt.conf` inside the bundle);
-- An environment variable inherited from the developer's shell (`DYLD_FALLBACK_FRAMEWORK_PATH`, `QT_PLUGIN_PATH`, `QML_IMPORT_PATH`);
-- A process started through the developer's Homebrew-launchd context.
-
-Reproduce and pinpoint the loader path that brings in the second copy with:
-
-```sh
-DYLD_PRINT_LIBRARIES=1 ./build/Spun.app/Contents/MacOS/Spun 2>&1 | head -40
-# Look for "/opt/homebrew" or "/usr/local" in the dylibs Spun pulls in.
-```
-
-If the duplicate still appears, file an issue with the `DYLD_PRINT_LIBRARIES` output; until a root cause is established the README stays short on speculation.
-
-</details>
-
-### First launch on macOS
-
-Because the `.app` is ad-hoc-signed and not notarised by Apple, double-clicking it the first time opens a Gatekeeper dialog that says the developer cannot be verified.
-
-1. In Finder, right-click (or Control-click) `Spun.app` and choose **Open**.
-2. Click **Open** in the dialog that appears.
-3. macOS remembers the decision for future launches.
-
-Alternatively, from the terminal:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Spun.app
-open /Applications/Spun.app
-```
-
-The bundle is self-contained: it does not need Homebrew Qt, TagLib or any other dependency installed on the user's machine.
 
 ## Start listening
 
@@ -404,7 +423,7 @@ You can then delete the Spun source folder. Your music stays where it was. Prefe
 - **A font is missing:** install it, reopen Spun and select it again. An unavailable saved font falls back to the system font.
 - **An audio file will not play:** supported formats depend on the codecs available to Qt Multimedia on your distribution.
 - **"Spun.app is damaged and can't be opened" on macOS:** the ad-hoc signature is intact but the file has the `com.apple.quarantine` xattr. Run `xattr -dr com.apple.quarantine /Applications/Spun.app` or move the app out of and back into `/Applications` (Finder re-extends quarantine to downloads). The right-click → Open workaround described in [First launch on macOS](#first-launch-on-macos) is the supported path.
-- **`objc[...] Class X is implemented in both` warnings on macOS:** appears when Homebrew's `qt` formula is installed and dyld is locating the second framework copy via a path that is not `LC_LOAD_DYLIB` (cause not fully understood — see [Build on macOS](#install) for the diagnostics). The bundle's own binaries are clean — `sign-macos-bundle.sh` rewrites every `/opt/homebrew` reference and fails the build if any survive. Verify with `find build/Spun.app/Contents -type f -perm +111 -exec otool -L {} \; | grep '/opt/homebrew'` (no output = clean); if the bundle is clean but the warning still appears, file an issue with the output of `DYLD_PRINT_LIBRARIES=1 ./build/Spun.app/Contents/MacOS/Spun`.
+- **`objc[...] Class X is implemented in both` warnings on macOS:** appears when Homebrew's `qt` formula is installed and dyld is locating the second framework copy via a path that is not `LC_LOAD_DYLIB` (cause not fully understood — see [Build on macOS](#build-on-macos) for the diagnostics). The bundle's own binaries are clean — `sign-macos-bundle.sh` rewrites every `/opt/homebrew` reference and fails the build if any survive. Verify with `find build/Spun.app/Contents -type f -perm +111 -exec otool -L {} \; | grep '/opt/homebrew'` (no output = clean); if the bundle is clean but the warning still appears, file an issue with the output of `DYLD_PRINT_LIBRARIES=1 ./build/Spun.app/Contents/MacOS/Spun`.
 
 Spun does not ask for your Apple Music password. Its Cider token is stored with owner-only file permissions in `~/.config/spun/cider-connection.json`. Preferences and local listening data also stay in `~/.config/spun/`. Artwork and music metadata may be fetched during playback and browsing. Do not include tokens, private configuration, listening history or personal logs in issue reports.
 
@@ -483,10 +502,9 @@ Before submitting substantial code contributions, open an issue to discuss scope
 
 ## Known limitations
 
-- **macOS port is Apple Silicon only.** No Intel build is shipped; x86_64 macs are not supported.
-- **Ad-hoc signature, no notarisation.** Apple Silicon Macs running macOS 14 require the right-click → Open workaround on first launch; subsequent launches work normally. No Developer ID signature or Apple notarisation ticket is requested at this time.
-- **`Class X is implemented in both` warnings** appear on developer machines that have Homebrew's `qt` formula installed alongside the running Spun.app. See [Build on macOS](#install).
-- **Some ctest cases still fail on macOS** (`spun-youtube`, `spun-immersive-media-ui`, the real-audio parts of `spun-playback-and-ui`, the `player->position() > 100` checks in `spun-remote-library`, and the `keyringSaveRestoreAndForget` checks in `spun-jellyfin-protocol` / `spun-subsonic-protocol`). These depend on either a real audio output device (no AudioUnit null backend on macOS 14 in this configuration) or `secret-tool` / D-Bus (no equivalent on macOS). They are not regressions; the same code passes on Linux. `spun-desktop-media` is excluded from the macOS CTest run by design.
+- **macOS port is Apple Silicon only.** No Intel build is shipped; x86_64 macs are not supported. The macOS-specific gaps (no notarisation, missing Keychain / Now Playing integration, headless QtMultimedia in self-tests) are summarised in [macOS port status](#macos-port-status).
+- **Linux runtime dependencies.** Qt 6.8+ and TagLib 2.0+ must be installed before building; see [Install → Linux](#linux).
+- **Some ctest cases depend on platform features.** The real-audio parts of `spun-playback-and-ui`, the `spun-youtube` streamed-buffer checks, `spun-immersive-media-ui` and the `player->position() > 100` checks in `spun-remote-library` require a working audio output (PulseAudio / PipeWire on Linux, CoreAudio on macOS). The `keyringSaveRestoreAndForget` checks in `spun-jellyfin-protocol` / `spun-subsonic-protocol` use `secret-tool` (Linux only) and are skipped on macOS. `spun-desktop-media` is excluded from the macOS CTest run by design.
 
 ## License
 
