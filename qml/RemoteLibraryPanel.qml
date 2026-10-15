@@ -585,6 +585,17 @@ Rectangle {
     component LibraryDialog: Dialog {
         id: dialog
         modal: true
+        // Disable the default modal scrim. Qt Quick Controls' Dialog paints a
+        // translucent rectangle behind every modal popup as a focus
+        // indicator; in Spun that rectangle shows up as a black square on
+        // top of the dialog (the dim layer is sized to the dialog itself,
+        // not the whole window, so only the popup area turns dark). The
+        // shape of the window is already conveyed by the corner radius, the
+        // shadow under the dialog and the modal input grab, so the dim is
+        // redundant here — and was previously removed for About in
+        // commit 6d3fb9d for the same reason. Disabling it keeps the form
+        // readable while the player stays visible behind the panel.
+        dim: false
         focus: true
         width: Math.min(360, Math.max(280, panel.width - 32))
         x: (panel.width - width) / 2

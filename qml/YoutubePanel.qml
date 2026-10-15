@@ -181,6 +181,12 @@ Rectangle {
         id: libraryDialog
         padding: SpunStyle.outerInset
         spacing: SpunStyle.inset
+        // Disable Qt Quick Controls' default modal scrim. The dim layer is
+        // sized to the dialog and renders as a translucent black rectangle
+        // over the form when modal:true is set on the usage, which looks
+        // like a stray dark square next to the popup itself. RemoteLibraryPanel
+        // applies the same override for the same reason.
+        dim: false
         property string acceptText: ""
         enter: SpunPopupEnter {}
         exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: SpunStyle.exit } }

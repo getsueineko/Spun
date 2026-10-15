@@ -299,7 +299,7 @@ endif()
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     spun_application(spun-diagnostics)
-    target_sources(spun-diagnostics PRIVATE src/subsonictest.cpp src/jellyfintest.cpp src/youtubetest.cpp src/librarytest.cpp src/librarytest.h src/eventstest.cpp src/mediauitest.cpp src/threedtest.cpp src/artworktest.cpp src/recordertest.cpp src/turntabletest.cpp src/cassettedecktest.cpp src/cddecktest.cpp src/tx6test.cpp)
+    target_sources(spun-diagnostics PRIVATE src/subsonictest.cpp src/jellyfintest.cpp src/youtubetest.cpp src/librarytest.cpp src/librarytest.h src/eventstest.cpp src/mediauitest.cpp src/threedtest.cpp src/artworktest.cpp src/recordertest.cpp src/turntabletest.cpp src/cassettedecktest.cpp src/cddecktest.cpp src/tx6test.cpp src/masktest.cpp)
     target_sources(spun-diagnostics PRIVATE src/performancetest.cpp src/performancetest.h)
     target_compile_definitions(spun-diagnostics PRIVATE SPUN_DIAGNOSTICS)
     target_link_libraries(spun-diagnostics PRIVATE Qt6::Test)
@@ -352,4 +352,8 @@ if(BUILD_TESTING)
     set_tests_properties(spun-immersive-media-ui PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QSG_RENDER_LOOP=basic;QT_QPA_PLATFORMTHEME="
         TIMEOUT 180 LABELS "ui;regression")
+    add_test(NAME spun-window-mask COMMAND spun-diagnostics --test-mask)
+    set_tests_properties(spun-window-mask PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME="
+        TIMEOUT 60 LABELS "ui;regression")
 endif()
