@@ -97,19 +97,21 @@ qt_add_library(spun_core STATIC
     src/theme.cpp src/theme.h src/cider.cpp src/cider.h src/ciderevents.cpp src/ciderevents.h)
 if(APPLE)
     target_sources(spun_core PRIVATE src/macosaccent.mm src/macosaccent.h
+                                     src/macosappearance.mm src/macosappearance.h
                                      src/macosmenubar.mm src/macosmenubar.h)
     target_link_libraries(spun_core PRIVATE "-framework Cocoa" "-framework AppKit")
     # Compile the Objective-C++ sources with ARC so Cocoa allocations stay in
     # step with the Obj-C reference counts and we do not have to balance every
     # alloc/release pair manually. The .mm files use `assign` on a raw C++
     # pointer for the MacosMenuBar back-reference, which ARC treats like MRC.
-    set_source_files_properties(src/macosaccent.mm src/macosmenubar.mm
+    set_source_files_properties(src/macosaccent.mm src/macosappearance.mm src/macosmenubar.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 else()
     # main.cpp registers MacosAccent / MacosMenuBar with QML on every platform;
     # the .mm implementations above exist only on Apple, so provide no-op
     # stand-ins everywhere else to keep the Linux build linking.
     target_sources(spun_core PRIVATE src/macosaccent_stub.cpp src/macosaccent.h
+                                     src/macosappearance_stub.cpp src/macosappearance.h
                                      src/macosmenubar_stub.cpp src/macosmenubar.h)
 endif()
 target_link_libraries(spun_core PUBLIC Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
@@ -299,7 +301,7 @@ endif()
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     spun_application(spun-diagnostics)
-    target_sources(spun-diagnostics PRIVATE src/subsonictest.cpp src/jellyfintest.cpp src/youtubetest.cpp src/librarytest.cpp src/librarytest.h src/eventstest.cpp src/mediauitest.cpp src/threedtest.cpp src/artworktest.cpp src/recordertest.cpp src/turntabletest.cpp src/cassettedecktest.cpp src/cddecktest.cpp src/tx6test.cpp src/masktest.cpp)
+    target_sources(spun-diagnostics PRIVATE src/subsonictest.cpp src/jellyfintest.cpp src/youtubetest.cpp src/librarytest.cpp src/librarytest.h src/eventstest.cpp src/mediauitest.cpp src/threedtest.cpp src/artworktest.cpp src/recordertest.cpp src/turntabletest.cpp src/cassettedecktest.cpp src/cddecktest.cpp src/tx6test.cpp src/masktest.cpp src/appearancetest.cpp src/appearancetest.h)
     target_sources(spun-diagnostics PRIVATE src/performancetest.cpp src/performancetest.h)
     target_compile_definitions(spun-diagnostics PRIVATE SPUN_DIAGNOSTICS)
     target_link_libraries(spun-diagnostics PRIVATE Qt6::Test)
@@ -354,6 +356,10 @@ if(BUILD_TESTING)
         TIMEOUT 180 LABELS "ui;regression")
     add_test(NAME spun-window-mask COMMAND spun-diagnostics --test-mask)
     set_tests_properties(spun-window-mask PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME="
+        TIMEOUT 60 LABELS "ui;regression")
+    add_test(NAME spun-appearance COMMAND spun-diagnostics --test-appearance)
+    set_tests_properties(spun-appearance PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME="
         TIMEOUT 60 LABELS "ui;regression")
 endif()

@@ -28,6 +28,7 @@
 #include "turntabletest.h"
 #include "cassettedecktest.h"
 #include "masktest.h"
+#include "appearancetest.h"
 #include "cddecktest.h"
 #include "tx6test.h"
 #include "performancetest.h"
@@ -42,6 +43,7 @@
 #include "mpris.h"
 #include "theme.h"
 #include "macosaccent.h"
+#include "macosappearance.h"
 #include "macosmenubar.h"
 #include "typography.h"
 #include "cider.h"
@@ -1774,7 +1776,7 @@ int main(int argc, char **argv) {
     for (int i=1; i<argc; ++i) {
         const QByteArray option = QByteArray(argv[i]).split('=').first();
         if (option == "--") break;
-        if (option == "--test-subsonic" || option == "--test-jellyfin" || option == "--test-youtube-live" || option == "--test-youtube" || option == "--test-performance" || option == "--self-test" || option == "--test-tx6" || option == "--test-cd-deck" || option == "--test-cassette-deck" || option == "--test-turntable" || option == "--test-recorder" || option == "--test-media-ui" || option == "--test-artwork" || option == "--test-3d-lighting" || option == "--test-3d-ui" || option == "--test-3d-library" || option == "--test-import-ui" || option == "--test-mask" || option == "--test-library" || option == "--smoke-live"
+        if (option == "--test-subsonic" || option == "--test-jellyfin" || option == "--test-youtube-live" || option == "--test-youtube" || option == "--test-performance" || option == "--self-test" || option == "--test-tx6" || option == "--test-cd-deck" || option == "--test-cassette-deck" || option == "--test-turntable" || option == "--test-recorder" || option == "--test-media-ui" || option == "--test-artwork" || option == "--test-3d-lighting" || option == "--test-3d-ui" || option == "--test-3d-library" || option == "--test-import-ui" || option == "--test-mask" || option == "--test-appearance" || option == "--test-library" || option == "--smoke-live"
             || option == "--verify-cider" || option == "--verify-cider-writes" || option == "--inspect-cider" || option == "--inspect-library") {
             // QGuiApplication is not constructed yet, so applicationFilePath()
             // is not available. argv[0] points at the launched binary on macOS
@@ -1851,6 +1853,7 @@ int main(int argc, char **argv) {
     parser.addOption({"test-media-ui", "Run isolated vinyl and cassette interaction checks"});
     parser.addOption({"test-import-ui", "Run isolated folder import UI checks"});
     parser.addOption({"test-mask", "Verify the window mask covers the remote library panel so Connect dialogs render without a transparent strip"});
+    parser.addOption({"test-appearance", "Verify the System / Light / Dark theme selector persists, propagates, and reacts to the OS appearance resolver"});
     parser.addOption({"smoke-live", "Run isolated checks on the live desktop"});
     parser.addOption({"verify-cider", "Verify a live Cider connection, briefly testing and restoring playback"});
     parser.addOption({"verify-cider-writes", "Exercise live Cider controls, reversible queue/audio edits and start song radio"});
@@ -1864,7 +1867,7 @@ int main(int argc, char **argv) {
     parser.addPositionalArgument("files", "Music files or album folders to play", "[files…]");
     parser.process(app);
     if (parser.isSet("export-cover")) return Disc::fallbackArt().save(parser.value("export-cover")) ? 0 : 1;
-    const bool test = parser.isSet("test-subsonic") || parser.isSet("test-jellyfin") || parser.isSet("test-youtube-live") || parser.isSet("test-youtube") || parser.isSet("test-performance") || parser.isSet("test-tx6") || parser.isSet("test-cd-deck") || parser.isSet("test-cassette-deck") || parser.isSet("test-turntable") || parser.isSet("test-recorder") || parser.isSet("test-artwork") || parser.isSet("test-3d-lighting") || parser.isSet("test-3d-ui") || parser.isSet("test-3d-library") || parser.isSet("test-media-ui") || parser.isSet("benchmark") || parser.isSet("test-import-ui") || parser.isSet("test-mask") || parser.isSet("self-test") || parser.isSet("smoke-live") || parser.isSet("test-library");
+    const bool test = parser.isSet("test-subsonic") || parser.isSet("test-jellyfin") || parser.isSet("test-youtube-live") || parser.isSet("test-youtube") || parser.isSet("test-performance") || parser.isSet("test-tx6") || parser.isSet("test-cd-deck") || parser.isSet("test-cassette-deck") || parser.isSet("test-turntable") || parser.isSet("test-recorder") || parser.isSet("test-artwork") || parser.isSet("test-3d-lighting") || parser.isSet("test-3d-ui") || parser.isSet("test-3d-library") || parser.isSet("test-media-ui") || parser.isSet("benchmark") || parser.isSet("test-import-ui") || parser.isSet("test-mask") || parser.isSet("test-appearance") || parser.isSet("self-test") || parser.isSet("smoke-live") || parser.isSet("test-library");
     if(test && qEnvironmentVariableIsSet("SPUN_TEST_SCREEN"))app.setDesktopFileName("spun-diagnostics");
     if (!test && !parser.isSet("config") && !parser.isSet("isolated")) {
 #ifdef Q_OS_MACOS
@@ -1908,7 +1911,7 @@ int main(int argc, char **argv) {
     QObject::connect(&typography, &Typography::changed, &app, applyFont);
     applyFont();
     const qint64 fontReady = startup.elapsed();
-    Theme theme(configRoot, stateRoot);
+    Theme theme(configRoot, stateRoot, settings);
     Player player(settings);
 #ifdef Q_OS_MACOS
     // Hook up the file-open event capture and drain anything Finder/Dock
@@ -2023,10 +2026,19 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty("platformNative", &native);
     MacosAccent macosAccent;
     engine.rootContext()->setContextProperty("macosAccent", &macosAccent);
+    MacosAppearance macosAppearance;
+    engine.rootContext()->setContextProperty("macosAppearance", &macosAppearance);
 #ifdef Q_OS_MACOS
     theme.overrideAccent(macosAccent.color());
     QObject::connect(&macosAccent, &MacosAccent::colorChanged, &theme,
                      [&] { theme.overrideAccent(macosAccent.color()); });
+    // Seed the System-mode resolver from the current OS appearance so the
+    // first paint already matches the user's setting; AppleInterfaceTheme
+    // notification keeps it in step afterwards.
+    theme.setSystemResolvedDark(macosAppearance.mode() == MacosAppearance::Dark);
+    QObject::connect(&macosAppearance, &MacosAppearance::modeChanged, &theme,
+                     [&] { theme.setSystemResolvedDark(
+                         macosAppearance.mode() == MacosAppearance::Dark); });
 #endif
     engine.rootContext()->setContextProperty("lyrics", &lyrics);
     engine.rootContext()->setContextProperty("presentation", &presentation);
@@ -2555,6 +2567,7 @@ int main(int argc, char **argv) {
     else if (parser.isSet("test-media-ui")) QTimer::singleShot(650, &app, [&] { app.exit(exerciseMediaUi(player,window,temp.path(),parser.value("capture-dir"))); });
     else if (parser.isSet("test-library")) QTimer::singleShot(650, &app, [&] { app.exit(exerciseLibrary(window,temp.path(),parser.value("capture-dir")) ? 1 : 0); });
     else if (parser.isSet("test-mask")) QTimer::singleShot(650, &app, [&] { app.exit(exerciseMask(window,temp.path(),parser.value("capture-dir"))); });
+    else if (parser.isSet("test-appearance")) QTimer::singleShot(650, &app, [&] { app.exit(exerciseAppearance(window,temp.path(),parser.value("capture-dir"))); });
     else if (test) QTimer::singleShot(650, &app, [&] {
         app.exit(exercise(player, theme, lyrics, window, temp.path(), parser.value("capture-dir"), parser.isSet("smoke-live"), parser.isSet("test-import-ui")));
     });

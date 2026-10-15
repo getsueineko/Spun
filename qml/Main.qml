@@ -2516,6 +2516,49 @@ ApplicationWindow {
                                 }
                             }
                         }
+                        // Theme selector: System / Light / Dark. The enum
+                        // values are pinned to the Theme::Mode integer set
+                        // (System=0, Light=1, Dark=2) so the QML side never
+                        // needs to look up the C++ enum by name. Keeping the
+                        // numeric literal here means a reordering of the C++
+                        // enum will trip a smoke test, not a user.
+                        Column {
+                            width: parent.width; spacing: 4
+                            SpunText { x: 12; text: "Theme"; color: root.mutedInk; font.pixelSize: SpunStyle.caption }
+                            Row {
+                                width: parent.width; spacing: 4
+                                Repeater {
+                                    id: themeChoices
+                                    model: [{label: "System", modeId: 0}, {label: "Light", modeId: 1}, {label: "Dark", modeId: 2}]
+                                    delegate: AbstractButton {
+                                        id: themeChoice
+                                        required property var modelData
+                                        required property int index
+                                        readonly property int modeId: modelData.modeId
+                                        objectName: ["system", "light", "dark"][index] + "ThemeButton"
+                                        width: (preferenceItems.width - 12) / 3; height: SpunStyle.target
+                                        text: modelData.label; checkable: true; autoExclusive: true
+                                        checked: theme.mode === modeId; hoverEnabled: true
+                                        Accessible.name: modelData.label + " theme"; Accessible.checked: checked
+                                        Keys.onLeftPressed: themeChoices.itemAt(Math.max(0,index-1)).forceActiveFocus(Qt.TabFocusReason)
+                                        Keys.onRightPressed: themeChoices.itemAt(Math.min(2,index+1)).forceActiveFocus(Qt.TabFocusReason)
+                                        Keys.onReturnPressed: clicked()
+                                        Keys.onEnterPressed: clicked()
+                                        onClicked: theme.mode = modeId
+                                        onActiveFocusChanged: if(activeFocus) preferenceScroll.reveal(this)
+                                        background: Rectangle {
+                                            radius: 20 * theme.radius; color: "transparent"
+                                            border.width: themeChoice.visualFocus ? 2 : 0; border.color: root.accent
+                                            Rectangle { anchors.fill: parent; radius: parent.radius; color: SpunStyle.selected; opacity: themeChoice.checked ? 1 : 0
+                                                Behavior on opacity { NumberAnimation { duration: SpunStyle.feedback; easing.type: Easing.BezierSpline; easing.bezierCurve: SpunStyle.effectsCurve } }
+                                            }
+                                            SpunStateLayer { anchors.fill: parent; radius: parent.radius; color: root.ink; hovered: themeChoice.hovered; pressed: themeChoice.down; focused: themeChoice.visualFocus }
+                                        }
+                                        contentItem: SpunText { text: themeChoice.text; color: themeChoice.checked ? root.accent : root.mutedInk; font.pixelSize: SpunStyle.body; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    }
+                                }
+                            }
+                        }
                         AbstractButton {
                             id: fontChoice
                             objectName: "fontChoice"
