@@ -13,6 +13,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QCoreApplication>
 #include <QUuid>
 #include <signal.h>
 #include <unistd.h>
@@ -65,6 +66,7 @@ Youtube::Youtube(const QString &directory, QObject *parent)
     : QObject(parent), m_player(directory + "/transport.ini", nullptr, true),
       m_directory(directory), m_path(directory + "/library.json") {
   QDir().mkpath(directory);
+  preparePackagedSupportFiles();
   m_save.setSingleShot(true);
   m_save.setInterval(250);
   connect(&m_save, &QTimer::timeout, this, &Youtube::persist);
@@ -237,9 +239,7 @@ void Youtube::request(const QString &channel, const QVariantMap &args,
             done(data);
           });
   const QString python = helperPython();
-  QString helper = qEnvironmentVariable("SPUN_YOUTUBE_HELPER",
-                                        QStringLiteral(SPUN_SOURCE_DIR) +
-                                            "/helper/youtube.py");
+  QString helper = qEnvironmentVariable("SPUN_YOUTUBE_HELPER", helperPath());
   p->start(python, {helper});
   p->write(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact));
   p->closeWriteChannel();
@@ -262,20 +262,52 @@ void Youtube::setEnabled(bool enabled) {
   }
   emit changed();
 }
-QString Youtube::helperPython() {
+QString Youtube::supportRoot() const {
+  const QString sourceRoot = QStringLiteral(SPUN_SOURCE_DIR);
+  if (QFileInfo::exists(sourceRoot + "/scripts/setup-youtube.sh") &&
+      QFileInfo::exists(sourceRoot + "/helper/youtube.py"))
+    return sourceRoot;
+  auto appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  if (appData.isEmpty())
+    appData = m_directory;
+  return appData + "/youtube-support";
+}
+QString Youtube::helperPath() const {
+  return supportRoot() + "/helper/youtube.py";
+}
+void Youtube::preparePackagedSupportFiles() const {
+  const QString sourceRoot = QStringLiteral(SPUN_SOURCE_DIR);
+  if (QFileInfo::exists(sourceRoot + "/scripts/setup-youtube.sh") &&
+      QFileInfo::exists(sourceRoot + "/helper/youtube.py"))
+    return;
+  const QString root = supportRoot();
+  const QList<QPair<QString, QString>> files{
+      {":/spun/helper/youtube.py", root + "/helper/youtube.py"},
+      {":/spun/helper/requirements.txt", root + "/helper/requirements.txt"},
+      {":/spun/scripts/setup-youtube.sh", root + "/scripts/setup-youtube.sh"}};
+  for (const auto &entry : files) {
+    QFile resource(entry.first);
+    if (!resource.open(QIODevice::ReadOnly))
+      continue;
+    QDir().mkpath(QFileInfo(entry.second).absolutePath());
+    QSaveFile output(entry.second);
+    if (output.open(QIODevice::WriteOnly) && output.write(resource.readAll()) >= 0)
+      output.commit();
+  }
+}
+QString Youtube::helperPython() const {
   const auto configured = qEnvironmentVariable("SPUN_YOUTUBE_PYTHON");
   if (!configured.isEmpty())
     return configured;
-  const auto bundled =
-      QStringLiteral(SPUN_SOURCE_DIR) + "/runtime/youtube/bin/python";
+  const auto bundled = supportRoot() + "/runtime/youtube/bin/python";
   if (QFileInfo::exists(bundled))
     return bundled;
   // A system interpreter may already carry the packages; check() decides.
   const auto system = QStandardPaths::findExecutable("python3");
   return system.isEmpty() ? bundled : system;
 }
-QString Youtube::setupScript() {
-  return QStringLiteral(SPUN_SOURCE_DIR) + "/scripts/setup-youtube.sh";
+QString Youtube::setupScript() const {
+  return supportRoot() + "/scripts/setup-youtube.sh";
 }
 bool Youtube::installable() const {
   return qEnvironmentVariable("SPUN_YOUTUBE_PYTHON").isEmpty() &&

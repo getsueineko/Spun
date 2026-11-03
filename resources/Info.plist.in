@@ -12,7 +12,7 @@
     <key>CFBundleIdentifier</key>
     <string>@SPUN_BUNDLE_ID@</string>
     <key>CFBundleVersion</key>
-    <string>@SPUN_VERSION@</string>
+    <string>@SPUN_BUNDLE_VERSION@</string>
     <key>CFBundleShortVersionString</key>
     <string>@SPUN_VERSION@</string>
     <key>CFBundlePackageType</key>

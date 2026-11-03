@@ -74,7 +74,7 @@ class Cider : public QObject {
     Q_PROPERTY(bool canNext READ canNext NOTIFY trackChanged)
     Q_PROPERTY(bool canPrevious READ canPrevious NOTIFY trackChanged)
 public:
-    explicit Cider(bool enabled = true, const QString &connectionPath = {}, const QUrl &rpcBase = QUrl("http://localhost:10767"), QObject *parent = nullptr);
+    explicit Cider(bool enabled = true, const QString &connectionPath = {}, const QUrl &rpcBase = QUrl("http://localhost:10767"), QObject *parent = nullptr, bool useKeychain = false, const QString &keychainAccount = QStringLiteral("cider"));
     QString audioQuality() const { return m_audioQuality; }
     bool qualityBusy() const { return m_qualityBusy; }
     Q_INVOKABLE void refreshAudioQuality();
@@ -307,6 +307,8 @@ private:
     QVariantList m_queue, m_pendingQueue;
     int m_pendingQueuePosition = -1, m_pendingQueueTotal = -1;
     QString m_connectionPath, m_apiToken, m_queueError;
+    QString m_keychainAccount = QStringLiteral("cider");
+    bool m_useKeychain = false;
     QUrl m_rpcBase;
     int m_queueIndex = -1;
     bool m_queueRefreshPending = false;

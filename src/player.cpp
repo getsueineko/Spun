@@ -5,6 +5,7 @@
 #include <QDirIterator>
 #include <QElapsedTimer>
 #include <QCryptographicHash>
+#include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QImageReader>
@@ -22,6 +23,22 @@
 #include <utility>
 
 static QString text(const TagLib::String &s) { return QString::fromStdString(s.to8Bit(true)); }
+
+static QString demoAudioPath() {
+    const QString source = QStringLiteral(SPUN_DEMO_FILE);
+    if (QFileInfo::exists(source)) return source;
+    const QString destination = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+        + "/assets/First-Light.flac";
+    if (QFileInfo::exists(destination)) return destination;
+    QFile resource(QStringLiteral(":/spun/assets/First-Light.flac"));
+    if (!resource.open(QIODevice::ReadOnly)) return {};
+    QDir().mkpath(QFileInfo(destination).absolutePath());
+    QSaveFile copy(destination);
+    if (!copy.open(QIODevice::WriteOnly) || copy.write(resource.readAll()) < 0 || !copy.commit())
+        return {};
+    copy.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    return destination;
+}
 
 Player::Player(const QString &settingsPath, QObject *parent, bool external)
     : QObject(parent), m_external(external), m_settings(settingsPath, QSettings::IniFormat) {
@@ -467,7 +484,14 @@ void Player::setCover(const QUrl &url) {
     m_tracks[m_index].cover = url.toLocalFile();
     loadArt(); emit queueChanged(); save();
 }
-void Player::demo() { addUrls({QUrl::fromLocalFile(QStringLiteral(SPUN_DEMO_FILE))}); }
+void Player::demo() {
+    const auto path = demoAudioPath();
+    if (path.isEmpty()) {
+        fail("The demo audio file could not be prepared.");
+        return;
+    }
+    addUrls({QUrl::fromLocalFile(path)});
+}
 void Player::setVolume(double value) {
     value = qBound(0., value, 1.);
     if (m_volume == value) return;

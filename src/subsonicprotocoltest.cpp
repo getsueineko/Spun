@@ -1,6 +1,8 @@
 #include "remotelibrary.h"
 #include "subsonicapi.h"
+#include "macoskeychain.h"
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -148,6 +150,14 @@ private slots:
   }
   void keyringSaveRestoreAndForget() {
     mode = "ok";
+#ifdef Q_OS_MACOS
+    const auto service = QStringLiteral("com.yappologistic.spun.subsonic");
+    const auto identity = QStringLiteral("subsonic\n") + base + "\nfixture";
+    const auto account = QString::fromLatin1(
+        QCryptographicHash::hash(identity.toUtf8(), QCryptographicHash::Sha256).toHex());
+    MacosKeychain::remove(service, account);
+    const auto clearKeychain = qScopeGuard([&] { MacosKeychain::remove(service, account); });
+#else
     const auto oldPath = qgetenv("PATH");
     const auto bin = storage.filePath("bin");
     QDir().mkpath(bin);
@@ -178,14 +188,22 @@ else:
       qputenv("PATH", oldPath);
       qunsetenv("SPUN_TEST_KEYRING");
     });
+#endif
     {
       SubsonicApi client;
       client.connectServer(base, "fixture", "keyring fixture + café", true);
       QTRY_VERIFY(client.connected());
-      QTRY_VERIFY(QSettings().value("subsonic/remember").toBool());
+#ifdef Q_OS_MACOS
+      QByteArray saved;
+      QTRY_VERIFY(MacosKeychain::read(service, account, &saved));
+      QCOMPARE(saved, QByteArray("keyring fixture + café"));
+#else
       QVERIFY(QFile::exists(secretFile));
+#endif
+      QSettings prefs(QSettings().fileName(), QSettings::IniFormat);
+      prefs.sync();
+      QVERIFY(prefs.value("subsonic/remember").toBool());
       QFile config(QSettings().fileName());
-      QSettings().sync();
       QVERIFY(config.open(QIODevice::ReadOnly));
       QVERIFY(!config.readAll().contains("keyring fixture"));
     }
@@ -194,8 +212,15 @@ else:
       QTRY_VERIFY(client.connected());
       QCOMPARE(client.username(), QString("fixture"));
       client.disconnectServer();
+#ifdef Q_OS_MACOS
+      QByteArray saved;
+      QVERIFY(!MacosKeychain::read(service, account, &saved));
+#else
       QTRY_VERIFY(!QFile::exists(secretFile));
-      QVERIFY(!QSettings().contains("subsonic/remember"));
+#endif
+      QSettings prefs(QSettings().fileName(), QSettings::IniFormat);
+      prefs.sync();
+      QVERIFY(!prefs.contains("subsonic/remember"));
     }
   }
   void cancelAndReconnect() {

@@ -1,6 +1,8 @@
 #include "jellyfin.h"
 #include "jellyfinapi.h"
+#include "macoskeychain.h"
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -154,6 +156,14 @@ private slots:
   }
   void keyringSaveRestoreAndForget() {
     mode = "ok";
+#ifdef Q_OS_MACOS
+    const auto service = QStringLiteral("com.yappologistic.spun.jellyfin");
+    const auto digest = QCryptographicHash::hash((base + "\nfixture").toUtf8(),
+                                                 QCryptographicHash::Sha256).toHex();
+    const auto account = QStringLiteral("jellyfin_") + QString::fromLatin1(digest);
+    MacosKeychain::remove(service, account);
+    const auto clearKeychain = qScopeGuard([&] { MacosKeychain::remove(service, account); });
+#else
     const auto oldPath = qgetenv("PATH");
     const auto bin = storage.filePath("bin");
     QDir().mkpath(bin);
@@ -184,14 +194,22 @@ else:
       qputenv("PATH", oldPath);
       qunsetenv("SPUN_TEST_KEYRING");
     });
+#endif
     {
       JellyfinApi client;
       client.connectServer(base, "fixture", "keyring fixture + café", true);
       QTRY_VERIFY(client.connected());
-      QTRY_VERIFY(QSettings().value("jellyfin/remember").toBool());
+#ifdef Q_OS_MACOS
+      QByteArray saved;
+      QTRY_VERIFY(MacosKeychain::read(service, account, &saved));
+      QCOMPARE(saved, QByteArray("fixture-token"));
+#else
       QVERIFY(QFile::exists(secretFile));
+#endif
+      QSettings prefs(QSettings().fileName(), QSettings::IniFormat);
+      prefs.sync();
+      QVERIFY(prefs.value("jellyfin/remember").toBool());
       QFile config(QSettings().fileName());
-      QSettings().sync();
       QVERIFY(config.open(QIODevice::ReadOnly));
       QVERIFY(!config.readAll().contains("keyring fixture"));
     }
@@ -200,8 +218,15 @@ else:
       QTRY_VERIFY(client.connected());
       QCOMPARE(client.username(), QString("fixture"));
       client.disconnectServer();
+#ifdef Q_OS_MACOS
+      QByteArray saved;
+      QVERIFY(!MacosKeychain::read(service, account, &saved));
+#else
       QTRY_VERIFY(!QFile::exists(secretFile));
-      QVERIFY(!QSettings().contains("jellyfin/remember"));
+#endif
+      QSettings prefs(QSettings().fileName(), QSettings::IniFormat);
+      prefs.sync();
+      QVERIFY(!prefs.contains("jellyfin/remember"));
     }
   }
   void cancelledLogin() {

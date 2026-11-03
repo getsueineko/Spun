@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.22)
-project(Spun VERSION 0.1.0 LANGUAGES CXX)
+project(Spun VERSION 1.3.2 LANGUAGES CXX)
 # Bundle identifier is upstream's com.yappologistic.spun; keep it as a single
 # CMake variable so Info.plist, MACOSX_BUNDLE_GUI_IDENTIFIER and the
 # single-instance server all see the same string.
 set(SPUN_BUNDLE_ID "com.yappologistic.spun" CACHE STRING "Reverse-DNS bundle identifier used for the macOS app")
-# Capture a stable build description once at configure time so the About
-# dialog can show "tag-N-gabcdef" and CFBundleVersion / ShortVersionString
-# stay in sync with the commit the binary was produced from. The fallback
-# "unknown" keeps out-of-tree builds from looking like a tagged release.
+set(SPUN_RELEASE_VERSION "" CACHE STRING "Explicit numeric release version for bundle metadata (for example 1.3.3)")
+# Capture a stable build description for the About dialog. Release metadata
+# can be set explicitly; untagged development builds get a unique bundle
+# version from their commit distance after the nearest numeric tag.
 find_package(Git QUIET)
 set(SPUN_BUILD_DESC "unknown")
 set(SPUN_GIT_TAG "${PROJECT_VERSION}")
@@ -45,7 +45,20 @@ if(NOT SPUN_GIT_TAG MATCHES "^[0-9]+(\\.[0-9]+)*$")
     message(STATUS "Tag '${SPUN_GIT_TAG}' is not a dotted number; using project version ${PROJECT_VERSION} for the bundle")
     set(SPUN_GIT_TAG "${PROJECT_VERSION}")
 endif()
-message(STATUS "Spun build description: ${SPUN_BUILD_DESC} (tag ${SPUN_GIT_TAG})")
+set(SPUN_BUNDLE_VERSION "${SPUN_GIT_TAG}")
+if(SPUN_RELEASE_VERSION)
+    if(NOT SPUN_RELEASE_VERSION MATCHES "^[0-9]+(\\.[0-9]+)*$")
+        message(FATAL_ERROR "SPUN_RELEASE_VERSION must contain only dotted numeric components, got '${SPUN_RELEASE_VERSION}'")
+    endif()
+    set(SPUN_GIT_TAG "${SPUN_RELEASE_VERSION}")
+    set(SPUN_BUNDLE_VERSION "${SPUN_RELEASE_VERSION}")
+else()
+    string(REGEX MATCH "-([0-9]+)-g[0-9a-f]+(-dirty)?$" SPUN_GIT_DISTANCE_MATCH "${SPUN_BUILD_DESC}")
+    if(SPUN_GIT_DISTANCE_MATCH AND CMAKE_MATCH_1 GREATER 0)
+        set(SPUN_BUNDLE_VERSION "${SPUN_GIT_TAG}.${CMAKE_MATCH_1}")
+    endif()
+endif()
+message(STATUS "Spun build description: ${SPUN_BUILD_DESC} (short version ${SPUN_GIT_TAG}, bundle version ${SPUN_BUNDLE_VERSION})")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -98,13 +111,14 @@ qt_add_library(spun_core STATIC
 if(APPLE)
     target_sources(spun_core PRIVATE src/macosaccent.mm src/macosaccent.h
                                      src/macosappearance.mm src/macosappearance.h
-                                     src/macosmenubar.mm src/macosmenubar.h)
-    target_link_libraries(spun_core PRIVATE "-framework Cocoa" "-framework AppKit")
+                                     src/macosmenubar.mm src/macosmenubar.h
+                                     src/macoskeychain.mm src/macoskeychain.h)
+    target_link_libraries(spun_core PRIVATE "-framework Cocoa" "-framework AppKit" "-framework Security")
     # Compile the Objective-C++ sources with ARC so Cocoa allocations stay in
     # step with the Obj-C reference counts and we do not have to balance every
     # alloc/release pair manually. The .mm files use `assign` on a raw C++
     # pointer for the MacosMenuBar back-reference, which ARC treats like MRC.
-    set_source_files_properties(src/macosaccent.mm src/macosappearance.mm src/macosmenubar.mm
+    set_source_files_properties(src/macosaccent.mm src/macosappearance.mm src/macosmenubar.mm src/macoskeychain.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 else()
     # main.cpp registers MacosAccent / MacosMenuBar with QML on every platform;
@@ -112,7 +126,8 @@ else()
     # stand-ins everywhere else to keep the Linux build linking.
     target_sources(spun_core PRIVATE src/macosaccent_stub.cpp src/macosaccent.h
                                      src/macosappearance_stub.cpp src/macosappearance.h
-                                     src/macosmenubar_stub.cpp src/macosmenubar.h)
+                                     src/macosmenubar_stub.cpp src/macosmenubar.h
+                                     src/macoskeychain_stub.cpp src/macoskeychain.h)
 endif()
 target_link_libraries(spun_core PUBLIC Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
     Qt6::Svg Qt6::Multimedia Qt6::Concurrent Qt6::DBus Qt6::Network PkgConfig::TAGLIB)
@@ -155,6 +170,19 @@ function(spun_application target)
     qt_add_resources(${target} "${target}_assets" PREFIX "/"
         FILES ${SPUN_SYMBOLS} assets/spun-window.png licenses/MaterialSymbols-LICENSE.txt
         OPTIONS ${asset_compression})
+    # Runtime data is embedded so a release .app does not depend on the
+    # checkout used to build it. YouTube's scripts are materialized into the
+    # per-user support directory only when the helper or installer needs a
+    # filesystem path.
+    qt_add_resources(${target} "${target}_youtube_support" PREFIX "/spun"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}"
+        FILES helper/youtube.py helper/requirements.txt scripts/setup-youtube.sh
+        OPTIONS ${asset_compression})
+    # FLAC is already compressed; keep it uncompressed in the resource table
+    # to avoid spending release build time recompressing it.
+    qt_add_resources(${target} "${target}_demo_audio" PREFIX "/spun"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}"
+        FILES assets/First-Light.flac)
     target_compile_definitions(${target} PRIVATE
         SPUN_BUILD_DESC="${SPUN_BUILD_DESC}")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -183,7 +211,7 @@ if(APPLE)
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/resources/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME "Spun"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${SPUN_BUNDLE_ID}"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${SPUN_GIT_TAG}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${SPUN_BUNDLE_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${SPUN_GIT_TAG}"
         MACOSX_BUNDLE_COPYRIGHT "Copyright (c) 2026 Spun contributors"
         OUTPUT_NAME "Spun"
@@ -300,6 +328,16 @@ if(CMAKE_STRIP AND CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    if(APPLE)
+        qt_add_executable(spun-macos-keychain-test src/macoskeychaintest.cpp)
+        target_link_libraries(spun-macos-keychain-test PRIVATE spun_core Qt6::Test)
+        add_test(NAME spun-macos-keychain COMMAND spun-macos-keychain-test)
+        set_tests_properties(spun-macos-keychain PROPERTIES TIMEOUT 30 LABELS "macos;security")
+        qt_add_executable(spun-cider-keychain-test src/cidermacoskeychaintest.cpp)
+        target_link_libraries(spun-cider-keychain-test PRIVATE spun_core Qt6::Test)
+        add_test(NAME spun-cider-keychain COMMAND spun-cider-keychain-test)
+        set_tests_properties(spun-cider-keychain PROPERTIES TIMEOUT 30 LABELS "macos;security")
+    endif()
     spun_application(spun-diagnostics)
     target_sources(spun-diagnostics PRIVATE src/subsonictest.cpp src/jellyfintest.cpp src/youtubetest.cpp src/librarytest.cpp src/librarytest.h src/eventstest.cpp src/mediauitest.cpp src/threedtest.cpp src/artworktest.cpp src/recordertest.cpp src/turntabletest.cpp src/cassettedecktest.cpp src/cddecktest.cpp src/tx6test.cpp src/masktest.cpp src/appearancetest.cpp src/appearancetest.h)
     target_sources(spun-diagnostics PRIVATE src/performancetest.cpp src/performancetest.h)

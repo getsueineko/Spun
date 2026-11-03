@@ -1973,7 +1973,14 @@ int main(int argc, char **argv) {
     youtube.transport()->setMedium(player.medium());
     youtube.transport()->setVinylAlbumMode(player.vinylAlbumMode());
     Tx6 tx6(&player,settings,!test || qEnvironmentVariableIsSet("SPUN_TEST_MIXER_OUTPUT"));
-    Cider cider(!test && !parser.isSet("isolated"), QFileInfo(settings).absolutePath() + "/cider-connection.json");
+#ifdef Q_OS_MACOS
+    const bool ciderKeychain = !test && !parser.isSet("isolated");
+#else
+    const bool ciderKeychain = false;
+#endif
+    Cider cider(!test && !parser.isSet("isolated"),
+                QFileInfo(settings).absolutePath() + "/cider-connection.json",
+                QUrl("http://localhost:10767"), nullptr, ciderKeychain);
     Lyrics lyrics(&player, &cider);
     Library library(&cider);
     MusicActions musicActions(&cider);

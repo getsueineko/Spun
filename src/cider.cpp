@@ -1,4 +1,5 @@
 #include "cider.h"
+#include "macoskeychain.h"
 #include "library.h"
 #include <QClipboard>
 #include <QGuiApplication>
@@ -38,14 +39,37 @@ static QVariantMap asMap(QVariant v) {
     return v.metaType() == QMetaType::fromType<QDBusArgument>() ? qdbus_cast<QVariantMap>(v.value<QDBusArgument>()) : v.toMap();
 }
 
-Cider::Cider(bool enabled, const QString &connectionPath, const QUrl &rpcBase, QObject *parent)
-    : QObject(parent), m_enabled(enabled), m_connectionPath(connectionPath), m_rpcBase(rpcBase) {
+Cider::Cider(bool enabled, const QString &connectionPath, const QUrl &rpcBase,
+             QObject *parent, bool useKeychain, const QString &keychainAccount)
+    : QObject(parent), m_enabled(enabled), m_connectionPath(connectionPath),
+      m_keychainAccount(keychainAccount), m_useKeychain(useKeychain),
+      m_rpcBase(rpcBase) {
     m_rpcNetwork.setProxy(QNetworkProxy::NoProxy);
     m_coverRetry.setSingleShot(true);
     connect(&m_coverRetry,&QTimer::timeout,this,&Cider::requestCurrentArtwork);
-    QFile connection(m_connectionPath);
-    if (connection.open(QIODevice::ReadOnly))
-        m_apiToken = QJsonDocument::fromJson(connection.readAll()).object().value("token").toString();
+    if (m_useKeychain) {
+        QByteArray saved;
+        if (MacosKeychain::read(QStringLiteral("com.yappologistic.spun"),
+                                m_keychainAccount, &saved)) {
+            m_apiToken = QString::fromUtf8(saved);
+            if (!m_connectionPath.isEmpty()) QFile::remove(m_connectionPath);
+        } else {
+            // Migrate older macOS installs that kept the token in a private
+            // JSON file. Keep that file until Keychain confirms the write.
+            QFile legacy(m_connectionPath);
+            if (legacy.open(QIODevice::ReadOnly))
+                m_apiToken = QJsonDocument::fromJson(legacy.readAll())
+                                 .object().value("token").toString();
+            if (!m_apiToken.isEmpty() &&
+                MacosKeychain::write(QStringLiteral("com.yappologistic.spun"),
+                                     m_keychainAccount, m_apiToken.toUtf8()))
+                QFile::remove(m_connectionPath);
+        }
+    } else {
+        QFile connection(m_connectionPath);
+        if (connection.open(QIODevice::ReadOnly))
+            m_apiToken = QJsonDocument::fromJson(connection.readAll()).object().value("token").toString();
+    }
     m_launchTimer.setSingleShot(true); m_launchTimer.setInterval(20000);
     connect(&m_launchTimer,&QTimer::timeout,this,[this] { emit launchChanged(); emit apiFeedback("Cider is taking longer to connect. Check its window and local API.",true); });
     m_recoveryTimer.setSingleShot(true);
@@ -419,6 +443,15 @@ void Cider::setQueueVisible(bool visible) {
     emit queueStatusChanged();
 }
 bool Cider::saveToken() {
+    if (m_useKeychain) {
+        if (MacosKeychain::write(QStringLiteral("com.yappologistic.spun"),
+                                 m_keychainAccount, m_apiToken.toUtf8())) {
+            if (!m_connectionPath.isEmpty()) QFile::remove(m_connectionPath);
+            return true;
+        }
+        emit apiFeedback("Connected for this session. Couldn’t save Cider access to Keychain.", true);
+        return false;
+    }
     if (m_connectionPath.isEmpty()) return true;
     const auto bytes=QJsonDocument(QJsonObject{{"token",m_apiToken}}).toJson(QJsonDocument::Compact);
     QFile previous(m_connectionPath);

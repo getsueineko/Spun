@@ -1,5 +1,6 @@
 #include "jellyfinapi.h"
 #include "jellyfinlrc.h"
+#include "macoskeychain.h"
 #include <QBuffer>
 #include <QCryptographicHash>
 #include <QFile>
@@ -1048,10 +1049,30 @@ void JellyfinApi::cover(const QVariantMap &track, const QString &path, Reply cb,
 }
 
 bool JellyfinApi::keyringAvailable() const {
+#ifdef Q_OS_MACOS
+  return MacosKeychain::available();
+#else
   return !QStandardPaths::findExecutable("secret-tool").isEmpty();
+#endif
 }
 void JellyfinApi::secret(const QStringList &args, const QByteArray &input,
                          std::function<void(bool, QByteArray)> callback) {
+#ifdef Q_OS_MACOS
+  const auto operation = args.value(0);
+  const auto account = args.value(args.size() - 1);
+  const auto service = QStringLiteral("com.yappologistic.spun.jellyfin");
+  if (operation == "lookup") {
+    QByteArray value;
+    const bool ok = MacosKeychain::read(service, account, &value);
+    callback(ok, value);
+  } else if (operation == "store") {
+    callback(MacosKeychain::write(service, account, input), {});
+  } else if (operation == "clear") {
+    callback(MacosKeychain::remove(service, account), {});
+  } else {
+    callback(false, {});
+  }
+#else
   if (!keyringAvailable()) {
     callback(false, {});
     return;
@@ -1081,6 +1102,7 @@ void JellyfinApi::secret(const QStringList &args, const QByteArray &input,
   p->write(input);
   p->closeWriteChannel();
   timer->start(15000);
+#endif
 }
 
 void JellyfinApi::movePlaylistItem(const QString &playlist,

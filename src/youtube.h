@@ -106,8 +106,11 @@ private:
   void fail(const QString &message);
   // The helper runs on the bundled runtime when present, otherwise on a
   // system interpreter that already carries the packages.
-  static QString helperPython();
-  static QString setupScript();
+  QString supportRoot() const;
+  QString helperPath() const;
+  QString helperPython() const;
+  QString setupScript() const;
+  void preparePackagedSupportFiles() const;
   void finishInstall(bool ok, const QString &message);
   Player m_player;
   QString m_directory, m_path, m_heading = "YouTube Music", m_page = "search",

@@ -26,7 +26,7 @@
 
 Play local music, browse YouTube Music anonymously, connect to Jellyfin, Navidrome or Subsonic, or control Apple Music through Cider. Spun puts your album artwork on a spinning CD, vinyl record, cassette or TP-7-inspired recorder, with an interface inspired by Material Design 3. Optional 3D players add physical depth and lighting that follows Noctalia's wallpaper palette.
 
-Linux is the primary platform. macOS is fully supported on Apple Silicon running macOS 14 (Sonoma) or newer; an Intel build is not provided.
+Linux is the primary platform. The macOS port targets Apple Silicon running macOS 14 (Sonoma) or newer; an Intel build is not provided. This checkout has been built and tested on Apple Silicon with Homebrew Qt 6.12.0.
 
 ### macOS port status
 
@@ -35,7 +35,7 @@ Linux is the primary development platform and the one the project is built aroun
 **Works the same as Linux:**
 
 - Local library, YouTube (anonymous), Jellyfin / Navidrome / Subsonic, Cider (Apple Music) sources, queue and queue cleanup, library browser, recovery sessions, QuickJump, settings and preferences.
-- The standalone `.app` bundle ships all Qt frameworks, QML modules, and an ad-hoc signature. No Qt / TagLib / Homebrew required on the user's machine.
+- The standalone `.app` bundle ships all Qt frameworks, QML modules, YouTube helper/setup files and demo audio, plus an ad-hoc signature. No Qt / TagLib / Homebrew required on the user's machine.
 - All five 3D players (CD, vinyl, cassette, recorder, TX-6 mixer), palette follow-through, scaling, motion checks, capture-and-compare self-tests that do not require a real audio device.
 - Standalone file-open, drag-and-drop, file dialogs, theming, font handling.
 
@@ -43,6 +43,7 @@ Linux is the primary development platform and the one the project is built aroun
 
 - Native application menu bar (Spun, File, View, Playback, Window, Help) with standard macOS key equivalents (Cmd+Q, Cmd+H, Cmd+W, Cmd+O, Cmd+L, Cmd+\\, Cmd+Shift+S, Cmd+Shift+R, Cmd+←/→, Cmd+,, Cmd+M for Minimize, Cmd+Opt+M for Spun's Mini Mode).
 - System accent colour from `[NSColor controlAccentColor]`, live-updated via `AppleColorPreferencesChangedNotification` with a 5 s polling fallback for ad-hoc-signed bundles where the notification is dropped.
+- Jellyfin, Subsonic and Cider credentials stored in the macOS login Keychain. Existing Cider token files are migrated after a successful Keychain write.
 - Single-instance forwarding via a `QLocalServer` named after the bundle identifier: a second launch from Finder (with or without files) routes the URLs into the running instance and exits, instead of opening another window.
 - FileOpen events from Finder / Dock, captured by a `QGuiApplication` subclass and drained into `Player::addUrls` once Player is alive.
 - Custom rpath rewriting in `scripts/sign-macos-bundle.sh`: Homebrew Qt's original `LC_LOAD_DYLIB` paths are rewritten to `@executable_path/../Frameworks/...` so dyld only loads the bundled frameworks, not the developer's Homebrew copy.
@@ -53,9 +54,8 @@ Linux is the primary development platform and the one the project is built aroun
 - **No Developer ID signing or Apple notarisation.** First launch needs the right-click → Open workaround; subsequent launches work normally. See [First launch on macOS](#first-launch-on-macos).
 - **No Homebrew formula or cask.** Install from the GitHub release tarball only.
 - **No Intel build.** Apple Silicon only; x86_64 Macs are not supported.
-- **Some ctest cases fail on macOS.** The `spun-youtube`, `spun-immersive-media-ui`, the real-audio parts of `spun-playback-and-ui`, the `player->position() > 100` checks in `spun-remote-library`, and the `keyringSaveRestoreAndForget` checks in `spun-jellyfin-protocol` / `spun-subsonic-protocol` all need either a real audio output device (no AudioUnit null backend on macOS 14 in this configuration) or `secret-tool` / D-Bus (no equivalent on macOS). They are pre-existing headless-platform gaps, not regressions. `spun-desktop-media` is excluded from the macOS CTest run by design.
+- **Some headless ctest cases need a real audio output device.** Playback-position checks in `spun-youtube`, `spun-immersive-media-ui`, `spun-playback-and-ui`, and `spun-remote-library` may fail when QtMultimedia has no active output. The Keychain integration tests require native macOS Keychain access. `spun-desktop-media` is excluded from the macOS CTest run because it requires D-Bus.
 - **No native media-session integration.** Spun does not yet publish to `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter`. Media keys and the macOS Now Playing widget rely on whatever Qt's media-session plugin exposes.
-- **Tokens stored as plain text.** Jellyfin / Subsonic / Cider credentials land in `~/Library/Application Support/com.yappologistic.spun/` instead of the Keychain. Replace with `SecItemAdd` / `SecItemCopyMatching` before any public release.
 - **`Class X is implemented in both` warnings** on developer machines that have Homebrew's `qt` formula installed alongside the running `Spun.app`. The shipped bundle itself is clean — see [Build on macOS](#build-on-macos) for the diagnostics.
 
 **Source-available · PolyForm Noncommercial 1.0.0.** Personal and other permitted noncommercial use is free. This is not an OSI-approved open-source license. [Read the license details](#license).
@@ -68,7 +68,7 @@ Spun on macOS ships as a standalone `.app` bundle with all Qt frameworks inside.
 
 **Manual install:**
 
-1. Download `Spun-0.1.0-macos-arm64.tar.gz` from the [latest GitHub release](https://github.com/yappologistic/Spun/releases/latest).
+1. Download `Spun-x.y.z-macos-arm64.tar.gz` for the current version from the [latest GitHub release](https://github.com/yappologistic/Spun/releases/latest).
 2. Double-click the archive in Finder to extract `Spun.app`.
 3. Drag `Spun.app` into `/Applications`.
 4. The first launch needs an extra step because the bundle is not notarised — see [First launch on macOS](#first-launch-on-macos).
@@ -91,7 +91,15 @@ Then, from a fresh clone:
 ./scripts/build-macos.sh -DBUILD_TESTING=OFF
 ```
 
-The script wires `CMAKE_PREFIX_PATH` to Homebrew's Qt, patches two GNU-isms in the CMake link step (`-Wl,-dead_strip`, BSD `strip -x`), and produces `build/Spun.app` with Qt frameworks, QML modules and an ad-hoc signature bundled in. The whole thing takes about three minutes on an M-series Mac.
+The script wires `CMAKE_PREFIX_PATH` to Homebrew's Qt, patches two GNU-isms in the CMake link step (`-Wl,-dead_strip`, BSD `strip -x`), and produces `build/Spun.app` with Qt frameworks, QML modules and an ad-hoc signature bundled in. YouTube support files and demo audio are embedded in the app; the optional helper runtime is installed under the user's application-support directory.
+
+For release builds, set the numeric version explicitly so the bundle metadata matches the release tag and archive:
+
+```bash
+./scripts/build-macos.sh -DBUILD_TESTING=OFF -DSPUN_RELEASE_VERSION=1.3.3
+```
+
+Without this option, development builds use the nearest numeric tag as the short version and append the commit distance to `CFBundleVersion`.
 
 If you also want the diagnostic companion:
 
@@ -284,8 +292,10 @@ transport. Starting a song does not change the Local or Cider queue.
 
 YouTube support is optional and installs itself from the app. Open the YouTube
 panel and choose **Set up YouTube support**; it reports progress and says what
-is missing if Python 3 (with venv/pip) or Node.js is not present. The same setup
-can still be run from a terminal:
+is missing if Python 3 (with venv/pip) or Node.js is not present. The app
+contains the helper and setup files; on macOS it extracts them to the user's
+application-support directory, so setup does not need a source checkout. The
+same setup can still be run from a source checkout in a terminal:
 
 ```sh
 ./scripts/setup-youtube.sh
@@ -293,7 +303,8 @@ can still be run from a terminal:
 
 A Python interpreter that already carries `ytmusicapi` and `yt-dlp` is used as
 is, with no download. Otherwise the helper runtime is isolated in
-`runtime/youtube`; it adds no browser engine and starts no background server.
+`runtime/youtube` in a source checkout or the app-support directory for a
+packaged macOS app; it adds no browser engine and starts no background server.
 Local and Cider playback do not need it. The Nix package does not currently
 bundle the optional Python runtime; use the environment overrides below with a
 separately managed runtime.

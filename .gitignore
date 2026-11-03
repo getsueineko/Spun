@@ -10,11 +10,13 @@
 !/NOTICE
 !/MIGRATION_NOTES.md
 !/RESUME_PROMPT.md
+!/STAGE1_HANDOFF.md
 
 !/src/
 /src/*
 !/src/*.cpp
 !/src/*.h
+!/src/macoskeychain.mm
 
 !/qml/
 /qml/*
