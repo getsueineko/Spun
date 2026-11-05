@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Finalize Spun.app after macdeployqt: copy QML plugins, rewrite rpaths and
-# ad-hoc sign the bundle so it runs standalone on macOS 14+.
+# sign the bundle so it runs standalone on macOS 14+. Ad-hoc signing is the
+# default; Developer ID and Hardened Runtime are opt-in build settings.
 #
 # macdeployqt leaves every Qt framework with an @loader_path/../../../ rpath
 # that resolves to /opt/homebrew/lib on developer machines. macOS then loads
@@ -9,12 +10,12 @@
 # those rpaths and adding @executable_path/../Frameworks in their place makes
 # dyld resolve every dependency to the bundle.
 #
-# Codesigning the inner frameworks with the same identifier as the bundle is
-# required by macOS 14 Gatekeeper — otherwise LaunchServices rejects the
-# app with "mapping process and mapped file have different Team IDs".
+# Codesigning the inner frameworks consistently with the bundle is required
+# by macOS 14+ for the nested code to load. An ad-hoc signature does not make
+# Gatekeeper treat a downloaded app as identified or notarized.
 set -euo pipefail
 
-bundle="${1:?usage: $0 Spun.app id entitlements qml-root [qt-prefix]}"
+bundle="${1:?usage: $0 Spun.app id entitlements qml-root [qt-prefix [identity [hardened-runtime]]]}"
 id="${2:?missing bundle identifier}"
 entitlements="${3:-}"
 qml_root="${4:-}"
@@ -26,6 +27,8 @@ qml_root="${4:-}"
 # prefix. Mirrors build-macos.sh, which already accepts the same
 # variable for the configure step.
 spun_qt_prefix="${SPUN_QT_PREFIX:-${5:-}}"
+signing_identity="${6:--}"
+hardened_runtime="${7:-OFF}"
 
 install_name_tool=/usr/bin/install_name_tool
 codesign=/usr/bin/codesign
@@ -536,17 +539,21 @@ while read -r bin; do process_bin "$bin"; done < <(find "$bundle/Contents/Framew
 #
 #    The entitlements file is applied only to the bundle root (which is
 #    what LaunchServices reads); per-binary entitlements on inner dylibs
-#    are unnecessary and slow signing down. disable-library-validation in
-#    resources/spun.entitlements is a forward-compatibility marker for
-#    hardened runtime; we deliberately do not enable hardened runtime
-#    here because the bundle is intended for direct execution on the
-#    developer's machine, not for distribution outside the Mac App Store.
+#    are unnecessary and slow signing down. Hardened Runtime remains opt-in;
+#    the default ad-hoc build does not need a Developer ID or Apple account.
 sign_bin() {
     local target="$1"
+    local signing_args=(--force --sign "$signing_identity")
+    if [[ "$signing_identity" != "-" ]]; then
+        signing_args+=(--timestamp)
+    fi
+    if [[ "$hardened_runtime" == "ON" ]]; then
+        signing_args+=(--options runtime)
+    fi
     # Re-signing needs write permission; if a previous run put the bundle
     # into a read-only state we drop that here.
     [[ -w "$target" ]] || chmod u+w "$target"
-    "$codesign" --force --sign - --identifier "$id" "$target"
+    "$codesign" "${signing_args[@]}" --identifier "$id" "$target"
 }
 # 4a. Helper dylibs under Contents/Resources/qml/ that are not inside a
 #     .framework directory. They are leaf plugins the QML engine loads
@@ -588,7 +595,14 @@ entitlements_args=()
 if [[ -n "$entitlements" && -f "$entitlements" ]]; then
     entitlements_args=(--entitlements "$entitlements")
 fi
-"$codesign" --force --deep --sign - --identifier "$id" \
+signing_args=(--force --deep --sign "$signing_identity")
+if [[ "$signing_identity" != "-" ]]; then
+    signing_args+=(--timestamp)
+fi
+if [[ "$hardened_runtime" == "ON" ]]; then
+    signing_args+=(--options runtime)
+fi
+"$codesign" "${signing_args[@]}" --identifier "$id" \
     "${entitlements_args[@]}" "$bundle"
 
 # 6. Verify the bundle. --deep + --strict is the only invocation that

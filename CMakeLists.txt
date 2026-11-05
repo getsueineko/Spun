@@ -5,6 +5,9 @@ project(Spun VERSION 1.3.2 LANGUAGES CXX)
 # single-instance server all see the same string.
 set(SPUN_BUNDLE_ID "com.yappologistic.spun" CACHE STRING "Reverse-DNS bundle identifier used for the macOS app")
 set(SPUN_RELEASE_VERSION "" CACHE STRING "Explicit numeric release version for bundle metadata (for example 1.3.3)")
+set(SPUN_MACOS_CODESIGN_IDENTITY "-" CACHE STRING "macOS signing identity; '-' creates an ad-hoc signature")
+option(SPUN_MACOS_HARDENED_RUNTIME "Enable Hardened Runtime during macOS code signing" OFF)
+option(SPUN_MACOS_NOTARIZE "Submit and staple the macOS app and disk image using a configured notarytool profile" OFF)
 # Capture a stable build description for the About dialog. Release metadata
 # can be set explicitly; untagged development builds get a unique bundle
 # version from their commit distance after the nearest numeric tag.
@@ -230,12 +233,65 @@ if(APPLE)
     #      "Class X is implemented in both" duplicate-class errors
     #   3. Add @executable_path/../Frameworks as rpath on every framework that
     #      references @rpath/* so dependencies resolve to the bundle
-    #   4. Ad-hoc codesign the whole bundle with a single shared identifier so
-    #      Gatekeeper accepts the inner frameworks as belonging to the app
-    # Without step 4, macOS 14+ LaunchServices rejects the bundle with
-    # "different Team IDs" and the app crashes before reaching main().
+    #   4. Sign the whole bundle consistently (ad-hoc by default)
+    # A consistent signature is required for the nested frameworks to load;
+    # ad-hoc signing does not identify the developer or bypass Gatekeeper.
+    # Without step 4, LaunchServices can reject nested code with inconsistent
+    # signatures before the app reaches main().
     find_program(MACDEPLOYQT_EXECUTABLE macdeployqt HINTS "${Qt6_DIR}/../../../bin")
-    if(MACDEPLOYQT_EXECUTABLE)
+    find_program(INSTALL_NAME_TOOL_EXECUTABLE install_name_tool)
+    find_program(CODESIGN_EXECUTABLE codesign)
+    find_program(HDIUTIL_EXECUTABLE hdiutil)
+    find_program(DITTO_EXECUTABLE ditto)
+    find_program(OTOOL_EXECUTABLE otool)
+
+    set(_spun_release_configuration FALSE)
+    if(CMAKE_CONFIGURATION_TYPES)
+        list(FIND CMAKE_CONFIGURATION_TYPES "Release" _spun_release_config_index)
+        if(NOT _spun_release_config_index EQUAL -1)
+            set(_spun_release_configuration TRUE)
+        endif()
+    elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+        set(_spun_release_configuration TRUE)
+    endif()
+
+    if(_spun_release_configuration)
+        set(_spun_required_macos_tools
+            MACDEPLOYQT_EXECUTABLE INSTALL_NAME_TOOL_EXECUTABLE CODESIGN_EXECUTABLE
+            HDIUTIL_EXECUTABLE DITTO_EXECUTABLE OTOOL_EXECUTABLE)
+        set(_spun_missing_macos_tools "")
+        foreach(_tool_var IN LISTS _spun_required_macos_tools)
+            if(NOT ${_tool_var})
+                list(APPEND _spun_missing_macos_tools "${_tool_var}")
+            endif()
+        endforeach()
+        if(_spun_missing_macos_tools)
+            list(JOIN _spun_missing_macos_tools ", " _spun_missing_macos_tools_text)
+            message(FATAL_ERROR
+                "A macOS Release build requires packaging tools: ${_spun_missing_macos_tools_text}. "
+                "Install Qt's macdeployqt and the Xcode Command Line Tools, then configure again.")
+        endif()
+    endif()
+
+    if(SPUN_MACOS_HARDENED_RUNTIME AND SPUN_MACOS_CODESIGN_IDENTITY STREQUAL "-")
+        message(FATAL_ERROR "SPUN_MACOS_HARDENED_RUNTIME requires a non-ad-hoc SPUN_MACOS_CODESIGN_IDENTITY")
+    endif()
+    if(SPUN_MACOS_CODESIGN_IDENTITY STREQUAL "")
+        message(FATAL_ERROR "SPUN_MACOS_CODESIGN_IDENTITY cannot be empty; use '-' for an ad-hoc signature")
+    endif()
+    if(SPUN_MACOS_NOTARIZE)
+        find_program(XCRUN_EXECUTABLE xcrun)
+        if(NOT XCRUN_EXECUTABLE)
+            message(FATAL_ERROR "SPUN_MACOS_NOTARIZE requires xcrun from Xcode or the Xcode Command Line Tools")
+        endif()
+        if(SPUN_MACOS_CODESIGN_IDENTITY STREQUAL "-" OR NOT SPUN_MACOS_HARDENED_RUNTIME)
+            message(FATAL_ERROR "Notarization requires a Developer ID signing identity and SPUN_MACOS_HARDENED_RUNTIME=ON")
+        endif()
+    endif()
+
+    if(MACDEPLOYQT_EXECUTABLE AND INSTALL_NAME_TOOL_EXECUTABLE AND CODESIGN_EXECUTABLE)
+        set_property(TARGET spun APPEND PROPERTY LINK_DEPENDS
+            "${CMAKE_SOURCE_DIR}/scripts/sign-macos-bundle.sh")
         # Omit -qmldir: the Qt 6.11 qmlimportscanner crashes on Spun's qml/
         # tree. The static QML cache already in the binary carries everything
         # Main.qml actually uses.
@@ -247,12 +303,10 @@ if(APPLE)
             COMMENT "Deploying Qt frameworks into Spun.app via macdeployqt"
             VERBATIM
         )
-        # The QML plugins, rpath rewriting and ad-hoc signing are all done
+        # The QML plugins, rpath rewriting and signing are all done
         # by scripts/sign-macos-bundle.sh in a single deterministic order.
         # file(COPY ...) cannot be sequenced against add_custom_command(POST_BUILD)
         # reliably on multi-job Ninja builds, so we run everything in shell.
-        find_program(INSTALL_NAME_TOOL_EXECUTABLE install_name_tool)
-        find_program(CODESIGN_EXECUTABLE codesign)
         if(INSTALL_NAME_TOOL_EXECUTABLE AND CODESIGN_EXECUTABLE)
             set(_bundle "$<TARGET_BUNDLE_DIR:spun>")
             # Resolve the QML root in this order: explicit SPUN_QML_ROOT env
@@ -311,10 +365,43 @@ if(APPLE)
                     "${_entitlements}"
                     "${_qml_root}"
                     "${_qt_prefix_arg}"
-                COMMENT "Deploying QML plugins, rewriting rpaths and ad-hoc signing Spun.app"
+                    "${SPUN_MACOS_CODESIGN_IDENTITY}"
+                    "$<IF:$<BOOL:${SPUN_MACOS_HARDENED_RUNTIME}>,ON,OFF>"
+                COMMENT "Deploying QML plugins, rewriting rpaths and signing Spun.app"
                 VERBATIM
             )
         endif()
+    endif()
+
+    if(MACDEPLOYQT_EXECUTABLE AND INSTALL_NAME_TOOL_EXECUTABLE AND CODESIGN_EXECUTABLE
+       AND HDIUTIL_EXECUTABLE AND DITTO_EXECUTABLE AND OTOOL_EXECUTABLE)
+        if(CMAKE_OSX_ARCHITECTURES)
+            string(REPLACE ";" "-" _spun_macos_arch "${CMAKE_OSX_ARCHITECTURES}")
+        else()
+            execute_process(COMMAND uname -m OUTPUT_VARIABLE _spun_macos_arch
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+        endif()
+        set(_spun_dmg_name "Spun-${SPUN_BUNDLE_VERSION}-macos-${_spun_macos_arch}.dmg")
+        if(CMAKE_CONFIGURATION_TYPES)
+            set(_spun_dmg_path "${CMAKE_BINARY_DIR}/dist/$<CONFIG>/${_spun_dmg_name}")
+        else()
+            set(_spun_dmg_path "${CMAKE_BINARY_DIR}/dist/${_spun_dmg_name}")
+        endif()
+        add_custom_command(OUTPUT "${_spun_dmg_path}"
+            COMMAND /bin/bash "${CMAKE_SOURCE_DIR}/scripts/package-macos-dmg.sh"
+                "$<TARGET_BUNDLE_DIR:spun>"
+                "${_spun_dmg_path}"
+                "$<IF:$<BOOL:${SPUN_MACOS_NOTARIZE}>,ON,OFF>"
+            DEPENDS spun "${CMAKE_SOURCE_DIR}/scripts/package-macos-dmg.sh"
+            COMMENT "Packaging standalone Spun.app as ${_spun_dmg_name}"
+            VERBATIM
+        )
+        if(NOT CMAKE_CONFIGURATION_TYPES AND CMAKE_BUILD_TYPE STREQUAL "Release")
+            add_custom_target(spun-dmg ALL DEPENDS "${_spun_dmg_path}")
+        else()
+            add_custom_target(spun-dmg DEPENDS "${_spun_dmg_path}")
+        endif()
+        message(STATUS "Spun macOS disk image: ${_spun_dmg_path}")
     endif()
 endif()
 if(CMAKE_STRIP AND CMAKE_BUILD_TYPE STREQUAL "Release")

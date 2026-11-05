@@ -22,17 +22,14 @@ if [[ -z "$qt_prefix" || ! -d "$qt_prefix" ]]; then
     exit 1
 fi
 
-# Sanity-check the Qt version against what Spun was built against. The
-# build is known to work on 6.11; other majors/m minors may need a fresh
-# qmlimportscanner run because Qt 6.11 ships a partial-rebuild of the QML
-# import graph that earlier versions cannot replay correctly.
+# Sanity-check the Qt version against versions verified with this port.
 if command -v "${qt_prefix}/bin/qmake" >/dev/null 2>&1; then
     qt_version="$("${qt_prefix}/bin/qmake" -query QT_VERSION 2>/dev/null || true)"
     if [[ -n "$qt_version" ]]; then
         qt_major="${qt_version%%.*}"
         qt_minor="$(echo "$qt_version" | cut -d. -f2)"
-        if [[ "$qt_major" != "6" || "$qt_minor" != "11" ]]; then
-            echo "WARNING: Spun is built and tested against Qt 6.11; detected ${qt_version}." >&2
+        if [[ "$qt_major" != "6" || ( "$qt_minor" != "11" && "$qt_minor" != "12" ) ]]; then
+            echo "WARNING: Spun packaging is verified with Qt 6.11 and 6.12; detected ${qt_version}." >&2
             echo "         Build may succeed but runtime / qmlimportscanner behaviour" >&2
             echo "         is untested on other minors." >&2
         fi
@@ -78,3 +75,6 @@ cmake --build "$spun_root/build" --parallel "$(sysctl -n hw.ncpu)"
 echo
 echo "Build complete. Binary at: $spun_root/build/Spun.app/Contents/MacOS/Spun"
 echo "Run with: open $spun_root/build/Spun.app"
+if [[ "$build_type" == "Release" ]]; then
+    echo "Release disk image is in: $spun_root/build/dist/"
+fi

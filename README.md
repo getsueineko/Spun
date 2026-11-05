@@ -30,12 +30,12 @@ Linux is the primary platform. The macOS port targets Apple Silicon running macO
 
 ### macOS port status
 
-Linux is the primary development platform and the one the project is built around. The macOS port shares the same C++/QML source, runs the same feature set end-to-end, and is verified manually before every release on Apple Silicon with Homebrew Qt 6.11.2 and macOS 14+.
+Linux is the primary development platform and the one the project is built around. The macOS port shares the same C++/QML source and targets Apple Silicon with macOS 14 or newer. This checkout was built and packaged with Homebrew Qt 6.12.0.
 
 **Works the same as Linux:**
 
 - Local library, YouTube (anonymous), Jellyfin / Navidrome / Subsonic, Cider (Apple Music) sources, queue and queue cleanup, library browser, recovery sessions, QuickJump, settings and preferences.
-- The standalone `.app` bundle ships all Qt frameworks, QML modules, YouTube helper/setup files and demo audio, plus an ad-hoc signature. No Qt / TagLib / Homebrew required on the user's machine.
+- The standalone `.app` bundle ships all Qt frameworks, QML modules, YouTube helper/setup files and demo audio, plus an ad-hoc signature. Release builds also create a compressed `.dmg` ready to attach to GitHub Releases. No Qt / TagLib / Homebrew required on the user's machine.
 - All five 3D players (CD, vinyl, cassette, recorder, TX-6 mixer), palette follow-through, scaling, motion checks, capture-and-compare self-tests that do not require a real audio device.
 - Standalone file-open, drag-and-drop, file dialogs, theming, font handling.
 
@@ -51,8 +51,8 @@ Linux is the primary development platform and the one the project is built aroun
 **Limited or missing compared to Linux (in priority order):**
 
 - **No CI on a macOS runner.** Builds and tests are run manually on a real M-series Mac before tagging; there is no `.github/workflows/macos.yml`. The same code passes `ctest` on Linux.
-- **No Developer ID signing or Apple notarisation.** First launch needs the right-click → Open workaround; subsequent launches work normally. See [First launch on macOS](#first-launch-on-macos).
-- **No Homebrew formula or cask.** Install from the GitHub release tarball only.
+- **No Developer ID signing or Apple notarisation by default.** The ad-hoc signature keeps the app bundle integrity-checkable but does not identify the developer to Gatekeeper. On first launch, approve Spun in System Settings → Privacy & Security → Open Anyway. See [First launch on macOS](#first-launch-on-macos).
+- **No Homebrew formula or cask.** Install from the GitHub release disk image.
 - **No Intel build.** Apple Silicon only; x86_64 Macs are not supported.
 - **Some headless ctest cases need a real audio output device.** Playback-position checks in `spun-youtube`, `spun-immersive-media-ui`, `spun-playback-and-ui`, and `spun-remote-library` may fail when QtMultimedia has no active output. The Keychain integration tests require native macOS Keychain access. `spun-desktop-media` is excluded from the macOS CTest run because it requires D-Bus.
 - **No native media-session integration.** Spun does not yet publish to `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter`. Media keys and the macOS Now Playing widget rely on whatever Qt's media-session plugin exposes.
@@ -64,16 +64,16 @@ Linux is the primary development platform and the one the project is built aroun
 
 ### macOS
 
-Spun on macOS ships as a standalone `.app` bundle with all Qt frameworks inside. It is ad-hoc-signed and not notarised, so Gatekeeper may require one extra click the first time you open it.
+Spun ships in a compressed disk image (`.dmg`) containing a standalone ad-hoc-signed `.app` and an Applications shortcut. The app includes its Qt frameworks. The ad-hoc signature does not provide a Developer ID or notarization, so Gatekeeper requires a one-time user approval on first launch.
 
 **Manual install:**
 
-1. Download `Spun-x.y.z-macos-arm64.tar.gz` for the current version from the [latest GitHub release](https://github.com/yappologistic/Spun/releases/latest).
-2. Double-click the archive in Finder to extract `Spun.app`.
-3. Drag `Spun.app` into `/Applications`.
-4. The first launch needs an extra step because the bundle is not notarised — see [First launch on macOS](#first-launch-on-macos).
+1. Download `Spun-x.y.z-macos-arm64.dmg` for the current version from the [latest GitHub release](https://github.com/yappologistic/Spun/releases/latest).
+2. Open the disk image and drag `Spun.app` to the Applications shortcut.
+3. Eject the mounted disk image.
+4. Launch Spun. If Gatekeeper blocks it, use the approval steps in [First launch on macOS](#first-launch-on-macos).
 
-There is no Homebrew formula or cask yet — install from the release tarball only.
+There is no Homebrew formula or cask yet — install from the release disk image.
 
 #### Build on macOS
 
@@ -91,7 +91,7 @@ Then, from a fresh clone:
 ./scripts/build-macos.sh -DBUILD_TESTING=OFF
 ```
 
-The script wires `CMAKE_PREFIX_PATH` to Homebrew's Qt, patches two GNU-isms in the CMake link step (`-Wl,-dead_strip`, BSD `strip -x`), and produces `build/Spun.app` with Qt frameworks, QML modules and an ad-hoc signature bundled in. YouTube support files and demo audio are embedded in the app; the optional helper runtime is installed under the user's application-support directory.
+The script wires `CMAKE_PREFIX_PATH` to Homebrew's Qt, configures a Release build, and produces `build/Spun.app` plus `build/dist/Spun-<bundle-version>-macos-arm64.dmg`. Release configuration fails if Qt's `macdeployqt`, Xcode Command Line Tools (`codesign`, `install_name_tool`, `otool`), or the built-in `hdiutil` / `ditto` packaging tools are missing. The `.app` is ad-hoc signed without an Apple Developer account. YouTube support files and demo audio are embedded in the app; the optional helper runtime is installed under the user's application-support directory.
 
 For release builds, set the numeric version explicitly so the bundle metadata matches the release tag and archive:
 
@@ -100,6 +100,14 @@ For release builds, set the numeric version explicitly so the bundle metadata ma
 ```
 
 Without this option, development builds use the nearest numeric tag as the short version and append the commit distance to `CFBundleVersion`.
+
+Developer ID signing, Hardened Runtime and notarization are optional. To enable them later, configure with `-DSPUN_MACOS_CODESIGN_IDENTITY="Developer ID Application: …" -DSPUN_MACOS_HARDENED_RUNTIME=ON -DSPUN_MACOS_NOTARIZE=ON`; configure a `notarytool` Keychain profile first, then set `SPUN_NOTARY_KEYCHAIN_PROFILE` when running the build. These options are off by default and are not needed to create the ad-hoc-signed app and disk image.
+
+For a multi-configuration generator, build the package target explicitly:
+
+```bash
+cmake --build build --config Release --target spun-dmg
+```
 
 If you also want the diagnostic companion:
 
@@ -143,18 +151,13 @@ If the duplicate still appears after the build is clean, please file an issue wi
 
 #### First launch on macOS
 
-Because the `.app` is ad-hoc-signed and not notarised by Apple, double-clicking it the first time opens a Gatekeeper dialog that says the developer cannot be verified.
+Because the `.app` is ad-hoc-signed and not notarised, Gatekeeper does not identify its publisher and blocks the first launch. After trying to open Spun:
 
-1. In Finder, right-click (or Control-click) `Spun.app` and choose **Open**.
-2. Click **Open** in the dialog that appears.
-3. macOS remembers the decision for future launches.
+1. Open **System Settings → Privacy & Security**.
+2. In the Security section, choose **Open Anyway** for Spun.
+3. Confirm the prompt. macOS remembers this approval for later launches.
 
-Alternatively, from the terminal:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Spun.app
-open /Applications/Spun.app
-```
+This user approval is the supported path for this distribution model. The build does not remove the download quarantine attribute or change Gatekeeper settings.
 
 The bundle is self-contained: it does not need Homebrew Qt, TagLib or any other dependency installed on the user's machine.
 
@@ -409,7 +412,7 @@ Immersive mode hides controls after inactivity; move the pointer or use the keyb
 
 ## Update or remove
 
-**macOS:** download the latest `Spun-x.y.z-macos-arm64.tar.gz` from the [releases page](https://github.com/yappologistic/Spun/releases/latest), quit Spun, replace `/Applications/Spun.app` with the new copy.
+**macOS:** download the latest `Spun-x.y.z-macos-arm64.dmg` from the [releases page](https://github.com/yappologistic/Spun/releases/latest), quit Spun, and replace `/Applications/Spun.app` with the copy from the mounted image.
 
 **Linux:** open a terminal in your Spun folder:
 
@@ -433,10 +436,10 @@ You can then delete the Spun source folder. Your music stays where it was. Prefe
 - **3D is unavailable:** install Qt Quick 3D and rebuild. Qt's software scenegraph backend does not support the 3D view; the regular player remains available.
 - **A font is missing:** install it, reopen Spun and select it again. An unavailable saved font falls back to the system font.
 - **An audio file will not play:** supported formats depend on the codecs available to Qt Multimedia on your distribution.
-- **"Spun.app is damaged and can't be opened" on macOS:** the ad-hoc signature is intact but the file has the `com.apple.quarantine` xattr. Run `xattr -dr com.apple.quarantine /Applications/Spun.app` or move the app out of and back into `/Applications` (Finder re-extends quarantine to downloads). The right-click → Open workaround described in [First launch on macOS](#first-launch-on-macos) is the supported path.
+- **Gatekeeper blocks Spun on first launch:** this is expected for the ad-hoc-signed, non-notarised build. Approve it through **System Settings → Privacy & Security → Open Anyway** as described in [First launch on macOS](#first-launch-on-macos). If macOS reports the app is damaged, verify the download and its signature instead of removing quarantine.
 - **`objc[...] Class X is implemented in both` warnings on macOS:** appears when Homebrew's `qt` formula is installed and dyld is locating the second framework copy via a path that is not `LC_LOAD_DYLIB` (cause not fully understood — see [Build on macOS](#build-on-macos) for the diagnostics). The bundle's own binaries are clean — `sign-macos-bundle.sh` rewrites every `/opt/homebrew` reference and fails the build if any survive. Verify with `find build/Spun.app/Contents -type f -perm +111 -exec otool -L {} \; | grep '/opt/homebrew'` (no output = clean); if the bundle is clean but the warning still appears, file an issue with the output of `DYLD_PRINT_LIBRARIES=1 ./build/Spun.app/Contents/MacOS/Spun`.
 
-Spun does not ask for your Apple Music password. Its Cider token is stored with owner-only file permissions in `~/.config/spun/cider-connection.json`. Preferences and local listening data also stay in `~/.config/spun/`. Artwork and music metadata may be fetched during playback and browsing. Do not include tokens, private configuration, listening history or personal logs in issue reports.
+Spun does not ask for your Apple Music password. On macOS, Cider access tokens are stored in the login Keychain; older token files are migrated after a successful Keychain write. On Linux, the token is stored with owner-only file permissions in `~/.config/spun/cider-connection.json`. Preferences and local listening data stay in the platform's application configuration directory. Artwork and music metadata may be fetched during playback and browsing. Do not include tokens, private configuration, listening history or personal logs in issue reports.
 
 ## Development
 
@@ -513,7 +516,7 @@ Before submitting substantial code contributions, open an issue to discuss scope
 
 ## Known limitations
 
-- **macOS port is Apple Silicon only.** No Intel build is shipped; x86_64 macs are not supported. The macOS-specific gaps (no notarisation, missing Keychain / Now Playing integration, headless QtMultimedia in self-tests) are summarised in [macOS port status](#macos-port-status).
+- **macOS port is Apple Silicon only.** No Intel build is shipped; x86_64 macs are not supported. The macOS-specific gaps (no Developer ID / notarization by default, no Now Playing integration, headless QtMultimedia in self-tests) are summarised in [macOS port status](#macos-port-status).
 - **Linux runtime dependencies.** Qt 6.8+ and TagLib 2.0+ must be installed before building; see [Install → Linux](#linux).
 - **Some ctest cases depend on platform features.** The real-audio parts of `spun-playback-and-ui`, the `spun-youtube` streamed-buffer checks, `spun-immersive-media-ui` and the `player->position() > 100` checks in `spun-remote-library` require a working audio output (PulseAudio / PipeWire on Linux, CoreAudio on macOS). The `keyringSaveRestoreAndForget` checks in `spun-jellyfin-protocol` / `spun-subsonic-protocol` use `secret-tool` (Linux only) and are skipped on macOS. `spun-desktop-media` is excluded from the macOS CTest run by design.
 
