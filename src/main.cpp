@@ -45,6 +45,7 @@
 #include "macosaccent.h"
 #include "macosappearance.h"
 #include "macosmenubar.h"
+#include "macosnowplaying.h"
 #include "typography.h"
 #include "cider.h"
 #include <QGuiApplication>
@@ -66,6 +67,7 @@
 #include <QDir>
 #include <QTemporaryDir>
 #include <QSaveFile>
+#include <memory>
 #ifdef SPUN_DIAGNOSTICS
 #include <QTest>
 #include <QQuickItemGrabResult>
@@ -2137,6 +2139,14 @@ int main(int argc, char **argv) {
         window->setPosition(screen->availableGeometry().topLeft()+QPoint(60,60));
     }
     if (parser.isSet("youtube")) { window->setProperty("useYoutube",true);window->setProperty("libraryOpen",true); }
+#ifdef Q_OS_MACOS
+    std::unique_ptr<MacosNowPlaying> macosNowPlaying;
+    if (!test && !parser.isSet("isolated")) {
+        macosNowPlaying = std::make_unique<MacosNowPlaying>(
+            &player, &cider, youtube.transport(), jellyfin.transport(), subsonic.transport());
+        macosNowPlaying->setSourceWindow(window);
+    }
+#endif
     if (!test && !parser.isSet("isolated")) { if (auto *mediaControls = registerMpris(&player, &cider, youtube.transport(), jellyfin.transport(), subsonic.transport())) mediaControls->setSourceWindow(window); }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &player, &Player::save);
     if (parser.isSet("benchmark")) {

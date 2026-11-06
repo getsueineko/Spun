@@ -18,6 +18,7 @@
 !/src/*.cpp
 !/src/*.h
 !/src/macoskeychain.mm
+!/src/macosnowplaying.mm
 
 !/qml/
 /qml/*

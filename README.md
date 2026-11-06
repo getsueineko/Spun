@@ -42,6 +42,7 @@ Linux is the primary development platform and the one the project is built aroun
 **Added specifically for macOS:**
 
 - Native application menu bar (Spun, File, View, Playback, Window, Help) with standard macOS key equivalents (Cmd+Q, Cmd+H, Cmd+W, Cmd+O, Cmd+L, Cmd+\\, Cmd+Shift+S, Cmd+Shift+R, Cmd+←/→, Cmd+,, Cmd+M for Minimize, Cmd+Opt+M for Spun's Mini Mode).
+- Native **Now Playing** support: macOS shows the active track, artist, album, cover, duration and playback state in its media controls. System play, pause, previous, next and seek commands control the source selected in Spun.
 - System accent colour from `[NSColor controlAccentColor]`, live-updated via `AppleColorPreferencesChangedNotification` with a 5 s polling fallback for ad-hoc-signed bundles where the notification is dropped.
 - Jellyfin, Subsonic and Cider credentials stored in the macOS login Keychain. Existing Cider token files are migrated after a successful Keychain write.
 - Single-instance forwarding via a `QLocalServer` named after the bundle identifier: a second launch from Finder (with or without files) routes the URLs into the running instance and exits, instead of opening another window.
@@ -55,7 +56,6 @@ Linux is the primary development platform and the one the project is built aroun
 - **No Homebrew formula or cask.** Install from the GitHub release disk image.
 - **No Intel build.** Apple Silicon only; x86_64 Macs are not supported.
 - **Some headless ctest cases need a real audio output device.** Playback-position checks in `spun-youtube`, `spun-immersive-media-ui`, `spun-playback-and-ui`, and `spun-remote-library` may fail when QtMultimedia has no active output. The Keychain integration tests require native macOS Keychain access. `spun-desktop-media` is excluded from the macOS CTest run because it requires D-Bus.
-- **No native media-session integration.** Spun does not yet publish to `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter`. Media keys and the macOS Now Playing widget rely on whatever Qt's media-session plugin exposes.
 - **`Class X is implemented in both` warnings** on developer machines that have Homebrew's `qt` formula installed alongside the running `Spun.app`. The shipped bundle itself is clean — see [Build on macOS](#build-on-macos) for the diagnostics.
 
 **Source-available · PolyForm Noncommercial 1.0.0.** Personal and other permitted noncommercial use is free. This is not an OSI-approved open-source license. [Read the license details](#license).
@@ -74,6 +74,14 @@ Spun ships in a compressed disk image (`.dmg`) containing a standalone ad-hoc-si
 4. Launch Spun. If Gatekeeper blocks it, use the approval steps in [First launch on macOS](#first-launch-on-macos).
 
 There is no Homebrew formula or cask yet — install from the release disk image.
+
+#### macOS Now Playing
+
+While Spun is playing, macOS can show the current track and cover in the system
+Now Playing controls. Use those controls or the keyboard media keys to play or
+pause, skip tracks, and seek when the selected source supports seeking. Commands
+follow Spun's active source, including Local, YouTube, Jellyfin, Subsonic and
+Cider.
 
 #### Build on macOS
 
@@ -516,7 +524,7 @@ Before submitting substantial code contributions, open an issue to discuss scope
 
 ## Known limitations
 
-- **macOS port is Apple Silicon only.** No Intel build is shipped; x86_64 macs are not supported. The macOS-specific gaps (no Developer ID / notarization by default, no Now Playing integration, headless QtMultimedia in self-tests) are summarised in [macOS port status](#macos-port-status).
+- **macOS port is Apple Silicon only.** No Intel build is shipped; x86_64 macs are not supported. The macOS-specific gaps (no Developer ID / notarization by default and headless QtMultimedia in self-tests) are summarised in [macOS port status](#macos-port-status).
 - **Linux runtime dependencies.** Qt 6.8+ and TagLib 2.0+ must be installed before building; see [Install → Linux](#linux).
 - **Some ctest cases depend on platform features.** The real-audio parts of `spun-playback-and-ui`, the `spun-youtube` streamed-buffer checks, `spun-immersive-media-ui` and the `player->position() > 100` checks in `spun-remote-library` require a working audio output (PulseAudio / PipeWire on Linux, CoreAudio on macOS). The `keyringSaveRestoreAndForget` checks in `spun-jellyfin-protocol` / `spun-subsonic-protocol` use `secret-tool` (Linux only) and are skipped on macOS. `spun-desktop-media` is excluded from the macOS CTest run by design.
 

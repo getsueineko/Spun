@@ -115,13 +115,14 @@ if(APPLE)
     target_sources(spun_core PRIVATE src/macosaccent.mm src/macosaccent.h
                                      src/macosappearance.mm src/macosappearance.h
                                      src/macosmenubar.mm src/macosmenubar.h
-                                     src/macoskeychain.mm src/macoskeychain.h)
-    target_link_libraries(spun_core PRIVATE "-framework Cocoa" "-framework AppKit" "-framework Security")
+                                     src/macoskeychain.mm src/macoskeychain.h
+                                     src/macosnowplaying.mm src/macosnowplaying.h)
+    target_link_libraries(spun_core PRIVATE "-framework Cocoa" "-framework AppKit" "-framework Security" "-framework MediaPlayer")
     # Compile the Objective-C++ sources with ARC so Cocoa allocations stay in
     # step with the Obj-C reference counts and we do not have to balance every
     # alloc/release pair manually. The .mm files use `assign` on a raw C++
     # pointer for the MacosMenuBar back-reference, which ARC treats like MRC.
-    set_source_files_properties(src/macosaccent.mm src/macosappearance.mm src/macosmenubar.mm src/macoskeychain.mm
+    set_source_files_properties(src/macosaccent.mm src/macosappearance.mm src/macosmenubar.mm src/macoskeychain.mm src/macosnowplaying.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 else()
     # main.cpp registers MacosAccent / MacosMenuBar with QML on every platform;
@@ -130,7 +131,8 @@ else()
     target_sources(spun_core PRIVATE src/macosaccent_stub.cpp src/macosaccent.h
                                      src/macosappearance_stub.cpp src/macosappearance.h
                                      src/macosmenubar_stub.cpp src/macosmenubar.h
-                                     src/macoskeychain_stub.cpp src/macoskeychain.h)
+                                     src/macoskeychain_stub.cpp src/macoskeychain.h
+                                     src/macosnowplaying_stub.cpp src/macosnowplaying.h)
 endif()
 target_link_libraries(spun_core PUBLIC Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
     Qt6::Svg Qt6::Multimedia Qt6::Concurrent Qt6::DBus Qt6::Network PkgConfig::TAGLIB)

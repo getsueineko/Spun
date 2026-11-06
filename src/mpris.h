@@ -63,6 +63,7 @@ public:
     bool shuffle() const { return m_remote ? m_cider->shuffle() : m_player->shuffle(); }
     void setShuffle(bool value) { if (m_remote) m_cider->setShuffle(value); else m_player->setShuffle(value); }
     QVariantMap metadata() const;
+    QImage artwork() const { return m_remote ? m_cider->artwork() : m_player->artwork(); }
     double volume() const { return m_remote ? m_cider->volume() : m_player->volume(); }
     void setVolume(double v);
     qlonglong position() const { return (m_remote ? m_cider->position() : m_player->position()) * 1000; }

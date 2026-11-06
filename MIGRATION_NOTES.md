@@ -360,7 +360,10 @@ Day 5 — README, Homebrew cask, CI, --self-test regression fix
 The full sketch (kept for reference, mostly superseded by what actually happened):
 - Days 1-3: build pipeline, .app bundle, standalone Qt frameworks (✅ done in Days 1-3).
 - Days 4-5: fix Qt 6.11 incompatibilities + UI smoke test + Homebrew formula (we did Day 4 ahead of schedule; Day 5 is the remaining stretch).
-- Day 6+: 3D player polish, MPNowPlayingInfoCenter, Keychain, CI on macOS runner.
+- Day 6+: 3D player polish, native `MPNowPlayingInfoCenter` /
+  `MPRemoteCommandCenter`, Keychain, CI on macOS runner. Now Playing is now
+  implemented for the active playback source; the CI and remaining polish work
+  are still future tasks.
 
 ---
 
