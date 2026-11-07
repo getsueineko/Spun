@@ -51,7 +51,7 @@ Linux is the primary development platform and the one the project is built aroun
 
 **Limited or missing compared to Linux (in priority order):**
 
-- **No CI on a macOS runner.** Builds and tests are run manually on a real M-series Mac before tagging; there is no `.github/workflows/macos.yml`. The same code passes `ctest` on Linux.
+- **No per-change macOS CI or test run.** The [macOS release workflow](.github/workflows/macos-release.yml) builds and packages releases from numeric tags; regular changes still need manual validation on an Apple Silicon Mac. The same code passes `ctest` on Linux.
 - **No Developer ID signing or Apple notarisation by default.** The ad-hoc signature keeps the app bundle integrity-checkable but does not identify the developer to Gatekeeper. On first launch, approve Spun in System Settings → Privacy & Security → Open Anyway. See [First launch on macOS](#first-launch-on-macos).
 - **No Homebrew formula or cask.** Install from the GitHub release disk image.
 - **No Intel build.** Apple Silicon only; x86_64 Macs are not supported.
