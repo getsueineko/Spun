@@ -41,13 +41,18 @@ jobs:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           dmg="build/dist/Spun-$RELEASE_VERSION-macos-arm64.dmg"
+          notes_file="$(mktemp)"
+          trap 'rm -f "$notes_file"' EXIT
           test -f "$dmg"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$RELEASE_VERSION" --jq .body > "$notes_file"
 
           if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_VERSION" --notes-file "$notes_file"
             gh release upload "$RELEASE_VERSION" "$dmg" --clobber
           else
             gh release create "$RELEASE_VERSION" "$dmg" \
               --verify-tag \
               --title "Spun $RELEASE_VERSION" \
-              --generate-notes
+              --notes-file "$notes_file"
           fi
