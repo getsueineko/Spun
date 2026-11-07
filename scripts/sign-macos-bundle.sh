@@ -408,12 +408,13 @@ if [[ -n "$qml_root" && -d "$qml_root" ]]; then
     done
 fi
 
-# 2. Strip absolute Homebrew rpath from the main executable. A missing rpath
-#    (no /opt/homebrew) leaves the binary as-is; install_name_tool exits
-#    non-zero only when the rpath really wasn't there, which we tolerate.
-if otool -l "$bundle/Contents/MacOS/Spun" | grep -q '/opt/homebrew'; then
-    "$install_name_tool" -delete_rpath /opt/homebrew/lib "$bundle/Contents/MacOS/Spun"
-fi
+# 2. Strip absolute Homebrew rpaths from the main executable. Check the
+#    LC_RPATH entries themselves: LC_LOAD_DYLIB paths can mention Homebrew
+#    even when the executable has no /opt/homebrew/lib rpath to delete.
+while read -r rp; do
+    [[ -z "$rp" ]] && continue
+    "$install_name_tool" -delete_rpath "$rp" "$bundle/Contents/MacOS/Spun"
+done < <(otool -l "$bundle/Contents/MacOS/Spun" 2>/dev/null | awk '/LC_RPATH/{getline; getline; sub(/^[[:space:]]*path /, ""); sub(/[[:space:]].*$/, ""); print}' | grep '^/opt/homebrew' || true)
 
 # 3. Rewrite every framework and plugin rpath, and rewrite any absolute
 #    LC_LOAD_DYLIB load commands that still point into /opt/homebrew.
