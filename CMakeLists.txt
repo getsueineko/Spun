@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Spun VERSION 1.3.2 LANGUAGES CXX)
+project(Spun VERSION 1.3.3 LANGUAGES CXX)
 # Bundle identifier is upstream's com.yappologistic.spun; keep it as a single
 # CMake variable so Info.plist, MACOSX_BUNDLE_GUI_IDENTIFIER and the
 # single-instance server all see the same string.

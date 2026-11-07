@@ -1,0 +1,53 @@
+name: macOS Release
+
+on:
+  push:
+    tags:
+      - '[0-9]*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tags must use the numeric X.Y.Z format (for example 1.3.3). Got: $RELEASE_TAG"
+            exit 1
+          fi
+
+      - name: Install build and release tools
+        run: brew install qt cmake ninja pkg-config taglib gh
+
+      - name: Build standalone DMG
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: ./scripts/build-macos.sh -DBUILD_TESTING=OFF "-DSPUN_RELEASE_VERSION=$RELEASE_VERSION"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          dmg="build/dist/Spun-$RELEASE_VERSION-macos-arm64.dmg"
+          test -f "$dmg"
+
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_VERSION" "$dmg" --clobber
+          else
+            gh release create "$RELEASE_VERSION" "$dmg" \
+              --verify-tag \
+              --title "Spun $RELEASE_VERSION" \
+              --generate-notes
+          fi

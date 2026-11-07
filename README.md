@@ -107,6 +107,11 @@ For release builds, set the numeric version explicitly so the bundle metadata ma
 ./scripts/build-macos.sh -DBUILD_TESTING=OFF -DSPUN_RELEASE_VERSION=1.3.3
 ```
 
+Pushing a numeric `X.Y.Z` tag (for example `1.3.3`) runs the
+`macOS Release` GitHub Actions workflow. It builds the Apple Silicon disk
+image and creates the matching GitHub Release with generated notes, or replaces
+the DMG asset if that release already exists.
+
 Without this option, development builds use the nearest numeric tag as the short version and append the commit distance to `CFBundleVersion`.
 
 Developer ID signing, Hardened Runtime and notarization are optional. To enable them later, configure with `-DSPUN_MACOS_CODESIGN_IDENTITY="Developer ID Application: …" -DSPUN_MACOS_HARDENED_RUNTIME=ON -DSPUN_MACOS_NOTARIZE=ON`; configure a `notarytool` Keychain profile first, then set `SPUN_NOTARY_KEYCHAIN_PROFILE` when running the build. These options are off by default and are not needed to create the ad-hoc-signed app and disk image.
